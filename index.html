@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Carnival Splash: Water Gun Gallery</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Courier New', Courier, monospace;
+            user-select: none;
+        }
+        #game-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        #hud {
+            display: flex;
+            justify-content: space-between;
+            padding: 20px 40px;
+            font-size: 36px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 3px 3px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000;
+            z-index: 10;
+        }
+        #score-display { color: #ffd700; }
+        #time-display { color: #ff4500; }
+        
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 24px;
+            height: 24px;
+            border: 4px solid rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 8px rgba(0,0,0,0.8);
+            transition: transform 0.1s;
+            z-index: 10;
+        }
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 6px;
+            height: 6px;
+            background: #ff0055;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+        #crosshair.shooting {
+            transform: translate(-50%, -50%) scale(1.3);
+            border-color: rgba(0, 255, 255, 1);
+        }
+
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 0, 30, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            color: white;
+            text-align: center;
+            z-index: 20;
+        }
+        h1 {
+            font-size: 72px;
+            margin-bottom: 10px;
+            color: #ffde00;
+            text-shadow: 5px 5px 0 #ff0055, 10px 10px 0 #000;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            margin-top: 0;
+        }
+        p {
+            font-size: 22px;
+            max-width: 600px;
+            line-height: 1.6;
+            margin-bottom: 25px;
+        }
+        .btn {
+            padding: 15px 50px;
+            font-size: 32px;
+            font-weight: bold;
+            background: #00ffcc;
+            color: #000;
+            border: 4px solid #fff;
+            border-radius: 12px;
+            cursor: pointer;
+            text-transform: uppercase;
+            box-shadow: 0 8px 0 #00997a, 0 15px 25px rgba(0,0,0,0.5);
+            transition: all 0.1s;
+            font-family: inherit;
+            margin-top: 20px;
+        }
+        .btn:active {
+            transform: translateY(8px);
+            box-shadow: 0 0px 0 #00997a, 0 5px 10px rgba(0,0,0,0.5);
+        }
+        #instructions {
+            background: rgba(255,255,255,0.1);
+            padding: 25px;
+            border-radius: 15px;
+            border: 3px dashed #ffde00;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        }
+        
+        .floating-score {
+            position: absolute;
+            color: #00ffcc;
+            font-weight: bold;
+            font-size: 36px;
+            font-family: 'Arial Black', sans-serif;
+            pointer-events: none;
+            text-shadow: 3px 3px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+            animation: floatUp 1s ease-out forwards;
+            transform: translate(-50%, -50%);
+            z-index: 15;
+        }
+        @keyframes floatUp {
+            0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -150%) scale(1.5); }
+        }
+        .bullseye-text {
+            color: #ff0055;
+            font-size: 50px;
+            text-shadow: 3px 3px 0 #fff, 5px 5px 0 #000;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+    
+    <div id="ui-layer">
+        <div id="hud">
+            <div>Score: <span id="score-display">0</span></div>
+            <div>Time: <span id="time-display">60</span>s</div>
+        </div>
+        <div id="crosshair"></div>
+    </div>
+
+    <div id="overlay">
+        <h1 id="title-text">Carnival Splash</h1>
+        <div id="instructions">
+            <p style="color: #00ffcc; font-size: 28px; text-shadow: 2px 2px #000;"><strong>Click & Hold to Shoot!</strong></p>
+            <p>Look around with your mouse. Spray water to knock down targets.</p>
+            <p style="color: #00ffcc; font-size: 20px; text-shadow: 1px 1px #000; margin-bottom: 20px;"><strong>Scroll Mouse Wheel to Zoom In/Out</strong></p>
+            <p style="text-align: left; margin: 0 auto; display: inline-block; font-size: 20px;">
+                ✈️ Stunt Plane: <strong style="color:#ff00ff">300 pts</strong><br>
+                ✨ Golden Duck: <strong style="color:#ffd700; text-shadow: 0 0 5px #ff8800;">500 pts</strong><br>
+                🚤 Speedboat Bullseye: <strong style="color:#00ffcc">200 pts</strong><br>
+                🎯 Duck/Boat Bullseye: <strong style="color:#ff0055">150 pts</strong><br>
+                🐟 Flying Fish: <strong style="color:#ffde00">100 pts</strong><br>
+                🏐 Bouncy Beach Ball: <strong>80 pts</strong><br>
+                🏓 Ping Pong Ball: <strong>50 pts</strong><br>
+                🍩 Inner Tube: <strong>30 pts</strong><br>
+            </p>
+        </div>
+        <button class="btn" id="start-btn">Play Now</button>
+    </div>
+
+    <!-- Load Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Load PointerLockControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+
+    <script>
+        // Game State Variables
+        let score = 0;
+        let timeLeft = 60;
+        let isPlaying = false;
+        let isShooting = false;
+        let gameTimerInterval;
+
+        // Three.js Core Variables
+        let scene, camera, renderer, controls;
+        let clock = new THREE.Clock();
+        
+        // Game Objects
+        const targets = []; // List of shootable objects
+        const waterParticles = [];
+        const splashes = []; // Splash particle pool
+        const confettis = []; // Confetti particles
+        let waterStreamGroup, splashGroup, confettiGroup, dustParticles;
+        const lightsList = []; // For twinkling lights
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2(0, 0);
+
+        // UI Elements
+        const scoreDisplay = document.getElementById('score-display');
+        const timeDisplay = document.getElementById('time-display');
+        const overlay = document.getElementById('overlay');
+        const startBtn = document.getElementById('start-btn');
+        const titleText = document.getElementById('title-text');
+        const crosshair = document.getElementById('crosshair');
+
+        // Dynamically create beachball striped texture
+        const bbCanvas = document.createElement('canvas');
+        bbCanvas.width = 256; bbCanvas.height = 128;
+        const bbCtx = bbCanvas.getContext('2d');
+        const bbColors = ['#ff0033', '#ffffff', '#00aaff', '#ffcc00', '#ffffff', '#00ffcc'];
+        for(let j=0; j<6; j++) {
+            bbCtx.fillStyle = bbColors[j];
+            bbCtx.fillRect(j * (256/6), 0, 256/6, 128);
+        }
+        const bbTex = new THREE.CanvasTexture(bbCanvas);
+        bbTex.wrapS = THREE.RepeatWrapping;
+        bbTex.wrapT = THREE.RepeatWrapping;
+
+        // Shared Materials
+        const materials = {
+            red: new THREE.MeshLambertMaterial({ color: 0xff0033 }),
+            white: new THREE.MeshLambertMaterial({ color: 0xffffff }),
+            yellow: new THREE.MeshLambertMaterial({ color: 0xffcc00 }),
+            orange: new THREE.MeshLambertMaterial({ color: 0xff6600 }),
+            blue: new THREE.MeshLambertMaterial({ color: 0x00aaff }),
+            brown: new THREE.MeshLambertMaterial({ color: 0x8b4513 }),
+            pink: new THREE.MeshLambertMaterial({ color: 0xff00ff }),
+            green: new THREE.MeshLambertMaterial({ color: 0x00ff00 }),
+            gold: new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 1.0, roughness: 0.2, emissive: 0x443300 }),
+            beachball: new THREE.MeshLambertMaterial({ map: bbTex }),
+            water: null 
+        };
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
+
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 6, 12); 
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+            renderer.outputEncoding = THREE.sRGBEncoding; 
+            document.getElementById('game-container').appendChild(renderer.domElement);
+
+            // 2. Controls
+            controls = new THREE.PointerLockControls(camera, document.body);
+            
+            startBtn.addEventListener('click', () => {
+                controls.lock();
+            });
+
+            controls.addEventListener('lock', () => {
+                if (!isPlaying) startGame();
+                overlay.style.display = 'none';
+            });
+
+            controls.addEventListener('unlock', () => {
+                if (isPlaying) pauseGame();
+            });
+
+            // 3. Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffdfaa, 0.8); 
+            dirLight.position.set(10, 20, 10);
+            dirLight.castShadow = true;
+            dirLight.shadow.camera.top = 30;
+            dirLight.shadow.camera.bottom = -30;
+            dirLight.shadow.camera.left = -30;
+            dirLight.shadow.camera.right = 30;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            const spotLight = new THREE.SpotLight(0xffffff, 0.8);
+            spotLight.position.set(0, 30, 10);
+            spotLight.angle = Math.PI / 4;
+            spotLight.penumbra = 0.1;
+            spotLight.decay = 2;
+            spotLight.distance = 200;
+            spotLight.castShadow = true;
+            scene.add(spotLight);
+
+            // 4. Environment
+            createEnvironment();
+
+            // 5. Particles & Water Gun
+            createParticleSystems();
+            createWaterGun();
+
+            // 6. Interaction
+            document.addEventListener('mousedown', (e) => {
+                if (controls.isLocked && e.button === 0) {
+                    isShooting = true;
+                    crosshair.classList.add('shooting');
+                }
+            });
+            document.addEventListener('mouseup', (e) => {
+                if (e.button === 0) {
+                    isShooting = false;
+                    crosshair.classList.remove('shooting');
+                }
+            });
+
+            // Zoom Feature
+            document.addEventListener('wheel', (e) => {
+                if (!controls.isLocked) return;
+                camera.fov += e.deltaY * 0.05;
+                camera.fov = Math.max(30, Math.min(110, camera.fov)); 
+                camera.updateProjectionMatrix();
+            });
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createEnvironment() {
+            // Ground Floor
+            const floorGeo = new THREE.PlaneGeometry(120, 120);
+            const floorMat = new THREE.MeshLambertMaterial({ color: 0x8b4513 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.y = -0.5;
+            scene.add(floor);
+
+            // Procedural Water Normal Map
+            const waterCanvas = document.createElement('canvas');
+            waterCanvas.width = 512;
+            waterCanvas.height = 512;
+            const waterContext = waterCanvas.getContext('2d');
+            for (let x = 0; x < 512; x++) {
+                for (let y = 0; y < 512; y++) {
+                    const val = Math.floor(Math.random() * 255);
+                    waterContext.fillStyle = `rgb(${val}, ${val}, ${val})`;
+                    waterContext.fillRect(x, y, 1, 1);
+                }
+            }
+            const waterNormalMap = new THREE.CanvasTexture(waterCanvas);
+            waterNormalMap.wrapS = THREE.RepeatWrapping;
+            waterNormalMap.wrapT = THREE.RepeatWrapping;
+            waterNormalMap.repeat.set(4, 4);
+
+            materials.water = new THREE.MeshPhysicalMaterial({
+                color: 0x0055ff, // Bluer, more vibrant pool color
+                metalness: 0.1,
+                roughness: 0.1, // Smoother for better lighting reflection
+                normalMap: waterNormalMap,
+                normalScale: new THREE.Vector2(0.3, 0.3), // Calmer waves to let the color pop
+                transmission: 0.6, // Less transparent so the pool looks deeper
+                opacity: 0.95,
+                transparent: true,
+                envMapIntensity: 1.0,
+            });
+
+            // The Water Pool - Shifted back to strictly stay behind counter
+            const waterGeo = new THREE.PlaneGeometry(100, 50);
+            const water = new THREE.Mesh(waterGeo, materials.water);
+            water.rotation.x = -Math.PI / 2;
+            // Center is -19, depth is 50. Front edge reaches z = 6. Counter starts at z = 7.
+            water.position.set(0, -0.2, -19); 
+            water.receiveShadow = true;
+            water.name = "WaterPool";
+            scene.add(water);
+
+            // Enclosed Carnival Tent Walls
+            const tentGeo = new THREE.CylinderGeometry(50, 50, 40, 32, 1, true);
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 512;
+            const context = canvas.getContext('2d');
+            for(let i=0; i<20; i++) {
+                context.fillStyle = i % 2 === 0 ? '#ff0033' : '#ffffff';
+                context.fillRect(i * 51.2, 0, 51.2, 512);
+            }
+            const stripeTex = new THREE.CanvasTexture(canvas);
+            stripeTex.wrapS = THREE.RepeatWrapping;
+            stripeTex.repeat.set(12, 1);
+
+            const wallMat = new THREE.MeshLambertMaterial({ map: stripeTex, side: THREE.BackSide });
+            const tentWall = new THREE.Mesh(tentGeo, wallMat);
+            tentWall.position.set(0, 15, 0);
+            scene.add(tentWall);
+
+            const roofGeo = new THREE.ConeGeometry(50, 20, 32, 1, true);
+            const roofMat = new THREE.MeshLambertMaterial({ map: stripeTex, side: THREE.BackSide });
+            const tentRoof = new THREE.Mesh(roofGeo, roofMat);
+            tentRoof.position.set(0, 35, 0);
+            scene.add(tentRoof);
+
+            // Counter - Made 50% thinner so you can see more water
+            const counterGeo = new THREE.BoxGeometry(20, 4, 1);
+            const counterMat = new THREE.MeshLambertMaterial({ color: 0xaa2222 });
+            const counter = new THREE.Mesh(counterGeo, counterMat);
+            counter.position.set(0, 2, 8); 
+            counter.castShadow = true;
+            counter.receiveShadow = true;
+            scene.add(counter);
+            
+            const counterTopGeo = new THREE.BoxGeometry(21, 0.5, 1.5);
+            const counterTopMat = new THREE.MeshLambertMaterial({ color: 0xd2b48c });
+            const counterTop = new THREE.Mesh(counterTopGeo, counterTopMat);
+            counterTop.position.set(0, 4.25, 8); 
+            scene.add(counterTop);
+
+            // Add Atmospheric Room Details
+            createAtmosphere();
+        }
+
+        function createAtmosphere() {
+            // Hanging String Lights
+            const lightGeo = new THREE.SphereGeometry(0.15, 8, 8);
+            const lightMat = new THREE.MeshBasicMaterial({ color: 0xffffee });
+            
+            for(let i=0; i<15; i++) {
+                const t = i / 14;
+                const x = -25 + t * 50;
+                // Create a drooping curved line
+                const y = 14 - Math.sin(t * Math.PI) * 4; 
+                const z = -5;
+                
+                const bulb = new THREE.Mesh(lightGeo, lightMat);
+                bulb.position.set(x, y, z);
+                scene.add(bulb);
+                
+                // Add actual glowing light to a few bulbs
+                if (i % 3 === 0) {
+                    const pl = new THREE.PointLight(0xfff0c0, 0.5, 15);
+                    pl.position.set(x, y, z);
+                    pl.userData = { baseIntensity: 0.5, phase: Math.random() * Math.PI * 2 };
+                    scene.add(pl);
+                    lightsList.push(pl);
+                }
+            }
+
+            // Decorative Carnival Balloons on the sides
+            const balloonGeo = new THREE.SphereGeometry(0.6, 16, 16);
+            balloonGeo.scale(1, 1.2, 1);
+            const colors = [0xff0033, 0x00aaff, 0xffcc00, 0x00ffcc, 0xff00ff];
+            
+            for(let i=0; i<8; i++) {
+                const bMat = new THREE.MeshPhysicalMaterial({
+                    color: colors[i % colors.length], roughness: 0.2, transmission: 0.5, transparent: true, opacity: 0.9
+                });
+                const balloon = new THREE.Mesh(balloonGeo, bMat);
+                
+                const x = i < 4 ? -12 - Math.random() * 4 : 12 + Math.random() * 4;
+                const y = 5 + Math.random() * 3;
+                const z = 6 + Math.random() * 3;
+                
+                balloon.position.set(x, y, z);
+                
+                // Balloon Knot
+                const knot = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.2, 4), bMat);
+                knot.position.y = -0.7;
+                knot.rotation.x = Math.PI;
+                balloon.add(knot);
+
+                // Balloon String
+                const stringGeo = new THREE.CylinderGeometry(0.01, 0.01, 3);
+                const stringMat = new THREE.MeshBasicMaterial({color: 0xffffff});
+                const str = new THREE.Mesh(stringGeo, stringMat);
+                str.position.y = -2;
+                balloon.add(str);
+
+                scene.add(balloon);
+            }
+
+            // Ambient Dust Particles for atmosphere
+            const dustGeo = new THREE.BufferGeometry();
+            const dustCount = 400;
+            const dustPos = new Float32Array(dustCount * 3);
+            for(let i=0; i<dustCount; i++) {
+                dustPos[i*3] = (Math.random() - 0.5) * 80;     // x
+                dustPos[i*3+1] = Math.random() * 25;           // y
+                dustPos[i*3+2] = -25 + Math.random() * 40;     // z
+            }
+            dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+            const dustMat = new THREE.PointsMaterial({color: 0xffffee, size: 0.15, transparent: true, opacity: 0.4});
+            dustParticles = new THREE.Points(dustGeo, dustMat);
+            scene.add(dustParticles);
+        }
+
+        function createParticleSystems() {
+            // Water Stream Particles
+            waterStreamGroup = new THREE.Group();
+            scene.add(waterStreamGroup);
+            
+            const dropletGeo = new THREE.SphereGeometry(0.05, 4, 4);
+            const dropletMat = new THREE.MeshPhysicalMaterial({
+                color: 0x00ffff, transparent: true, opacity: 0.8, transmission: 0.9, roughness: 0.1
+            });
+            
+            // Increased from 60 to 200 for a denser, longer continuous stream
+            for (let i = 0; i < 200; i++) {
+                const drop = new THREE.Mesh(dropletGeo, dropletMat);
+                drop.visible = false;
+                waterParticles.push({
+                    mesh: drop, active: false, velocity: new THREE.Vector3(), life: 0
+                });
+                waterStreamGroup.add(drop);
+            }
+
+            // Splash Particles
+            splashGroup = new THREE.Group();
+            scene.add(splashGroup);
+            const splashGeo = new THREE.SphereGeometry(0.04, 4, 4);
+            
+            for (let i = 0; i < 200; i++) {
+                const s = new THREE.Mesh(splashGeo, dropletMat); // Reusing water material
+                s.visible = false;
+                splashes.push({
+                    mesh: s, active: false, velocity: new THREE.Vector3(), life: 0
+                });
+                splashGroup.add(s);
+            }
+
+            // Confetti Particles (for winning/game over)
+            confettiGroup = new THREE.Group();
+            scene.add(confettiGroup);
+            const confettiGeo = new THREE.PlaneGeometry(0.2, 0.2);
+            const confColors = [0xff0033, 0x00aaff, 0xffcc00, 0x00ffcc, 0xff00ff];
+            for (let i = 0; i < 150; i++) {
+                const cMat = new THREE.MeshBasicMaterial({ color: confColors[i % confColors.length], side: THREE.DoubleSide });
+                const mesh = new THREE.Mesh(confettiGeo, cMat);
+                mesh.visible = false;
+                confettis.push({
+                    mesh: mesh, active: false, velocity: new THREE.Vector3(), angularVel: new THREE.Vector3()
+                });
+                confettiGroup.add(mesh);
+            }
+        }
+
+        function createWaterGun() {
+            const gunGroup = new THREE.Group();
+            
+            const barrelGeo = new THREE.CylinderGeometry(0.15, 0.2, 1.5, 16);
+            barrelGeo.rotateX(Math.PI / 2);
+            const barrel = new THREE.Mesh(barrelGeo, materials.blue);
+            barrel.position.set(0.5, -0.5, -1);
+            gunGroup.add(barrel);
+
+            const tankGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 16);
+            const tank = new THREE.Mesh(tankGeo, materials.green);
+            tank.position.set(0.5, -0.2, -0.6);
+            gunGroup.add(tank);
+
+            const nozzleGeo = new THREE.CylinderGeometry(0.05, 0.15, 0.3, 16);
+            nozzleGeo.rotateX(Math.PI / 2);
+            const nozzle = new THREE.Mesh(nozzleGeo, materials.orange);
+            nozzle.position.set(0.5, -0.5, -1.8);
+            gunGroup.add(nozzle);
+
+            // Scale down the gun by 30% (from 0.6 down to 0.42)
+            gunGroup.scale.set(0.42, 0.42, 0.42);
+            // Offset it slightly so it still looks naturally held after shrinking
+            gunGroup.position.set(0.1, -0.2, -0.2); 
+            
+            camera.add(gunGroup);
+            scene.add(camera);
+        }
+
+        function createSplash(position, normal = new THREE.Vector3(0, 1, 0), count = 5) {
+            let emitted = 0;
+            for (let i = 0; i < splashes.length; i++) {
+                if (emitted >= count) break;
+                const s = splashes[i];
+                if (!s.active) {
+                    s.active = true;
+                    s.life = 0.3 + Math.random() * 0.3;
+                    s.mesh.position.copy(position);
+                    s.mesh.visible = true;
+                    s.mesh.scale.setScalar(1);
+
+                    s.velocity.copy(normal).multiplyScalar(3 + Math.random() * 4);
+                    s.velocity.x += (Math.random() - 0.5) * 5;
+                    s.velocity.z += (Math.random() - 0.5) * 5;
+                    
+                    // Always bias splashes slightly upwards
+                    s.velocity.y = Math.abs(s.velocity.y) + 2; 
+
+                    emitted++;
+                }
+            }
+        }
+
+        // --- Target Factory ---
+
+        function createBullseyeTarget(radius) {
+            const group = new THREE.Group();
+            group.userData.isBullseyeGroup = true; // Tag for 'lookAt' logic
+
+            const r1 = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.1, 16), materials.red);
+            const r2 = new THREE.Mesh(new THREE.CylinderGeometry(radius*0.6, radius*0.6, 0.12, 16), materials.white);
+            const r3 = new THREE.Mesh(new THREE.CylinderGeometry(radius*0.25, radius*0.25, 0.14, 16), materials.red);
+            
+            r1.rotation.x = Math.PI / 2;
+            r2.rotation.x = Math.PI / 2;
+            r3.rotation.x = Math.PI / 2;
+            
+            group.add(r1, r2, r3);
+            
+            [r1, r2, r3].forEach(mesh => {
+                mesh.userData = { isTarget: true, type: 'bullseye', points: 150 };
+            });
+            return group;
+        }
+
+        function spawnTarget() {
+            const types = ['duck', 'boat', 'tube', 'pingpong', 'fish', 'beachball', 'speedboat', 'airplane', 'golden_duck'];
+            let type;
+            const r = Math.random();
+            if (r < 0.01) type = 'golden_duck'; // Reduced from 0.05 (5%) to 0.01 (1%) chance for Jackpot!
+            else if (r < 0.20) type = 'duck';
+            else if (r < 0.32) type = 'boat';
+            else if (r < 0.42) type = 'tube';
+            else if (r < 0.52) type = 'pingpong';
+            else if (r < 0.62) type = 'beachball';
+            else if (r < 0.72) type = 'speedboat';
+            else if (r < 0.85) type = 'airplane';
+            else type = 'fish';
+
+            const targetObj = new THREE.Group();
+            targetObj.userData = { 
+                type: type, 
+                active: true, 
+                speed: (Math.random() * 2 + 2) * (Math.random() > 0.5 ? 1 : -1), 
+                baseY: 0,
+                age: 0
+            };
+
+            const zPos = -5 - (Math.random() * 12); 
+            const startX = targetObj.userData.speed > 0 ? -25 : 25;
+            targetObj.position.set(startX, 0, zPos);
+
+            switch(type) {
+                case 'duck':
+                    const duckBody = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 1.2), materials.yellow);
+                    duckBody.position.y = 0.4;
+                    duckBody.castShadow = true;
+                    duckBody.userData = { isTarget: true, type: 'body', points: 10, parentGrp: targetObj };
+                    
+                    const duckHead = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), materials.yellow);
+                    duckHead.position.set(0, 1.1, targetObj.userData.speed > 0 ? 0.3 : -0.3);
+                    duckHead.castShadow = true;
+                    duckHead.userData = duckBody.userData;
+
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.4, 4), materials.orange);
+                    beak.rotation.x = Math.PI / 2;
+                    beak.position.set(0, 1.1, targetObj.userData.speed > 0 ? 0.7 : -0.7);
+                    beak.userData = duckBody.userData;
+
+                    const duckBullseye = createBullseyeTarget(0.4);
+                    duckBullseye.position.set(0, 0.5, 0.65); 
+                    duckBullseye.children.forEach(c => c.userData.parentGrp = targetObj);
+
+                    targetObj.add(duckBody, duckHead, beak, duckBullseye);
+                    break;
+
+                case 'boat':
+                    const hull = new THREE.Mesh(new THREE.BoxGeometry(2, 0.6, 1), materials.red);
+                    hull.position.y = 0.3;
+                    hull.userData = { isTarget: true, type: 'body', points: 10, parentGrp: targetObj };
+
+                    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1, 0.8, 0.8), materials.white);
+                    cabin.position.set(targetObj.userData.speed > 0 ? -0.3 : 0.3, 1, 0);
+                    cabin.userData = hull.userData;
+
+                    const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.6), materials.brown);
+                    stack.position.set(targetObj.userData.speed > 0 ? 0.3 : -0.3, 1.2, 0);
+                    stack.userData = hull.userData;
+
+                    const boatBullseye = createBullseyeTarget(0.4);
+                    boatBullseye.position.set(0, 0.5, 0.55);
+                    boatBullseye.children.forEach(c => c.userData.parentGrp = targetObj);
+
+                    targetObj.add(hull, cabin, stack, boatBullseye);
+                    break;
+
+                case 'speedboat':
+                    targetObj.userData.speed *= 2.5; // Runs super fast
+                    const sHullGeo = new THREE.ConeGeometry(0.6, 2, 8);
+                    const sHull = new THREE.Mesh(sHullGeo, materials.white);
+                    sHull.position.y = 0.3;
+                    // Rotate so the tip points in direction of travel
+                    sHull.rotation.z = targetObj.userData.speed > 0 ? -Math.PI/2 : Math.PI/2;
+                    sHull.userData = { isTarget: true, type: 'body', points: 20, parentGrp: targetObj };
+
+                    const spoiler = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.5, 0.8), materials.red);
+                    spoiler.position.set(targetObj.userData.speed > 0 ? -0.8 : 0.8, 0.5, 0);
+                    spoiler.userData = sHull.userData;
+
+                    const speedBullseye = createBullseyeTarget(0.35);
+                    speedBullseye.position.set(0, 0.8, 0);
+                    // Override points for hard target
+                    speedBullseye.children.forEach(c => {
+                        c.userData.parentGrp = targetObj;
+                        c.userData.points = 200;
+                    });
+
+                    targetObj.add(sHull, spoiler, speedBullseye);
+                    break;
+
+                case 'airplane':
+                    targetObj.userData.speed *= 3.5; // Very fast
+                    targetObj.position.y = 5 + Math.random() * 3; // High up in the air
+                    targetObj.position.z = -8 - Math.random() * 5; 
+
+                    const fuselageGeo = new THREE.CylinderGeometry(0.4, 0.2, 3, 16);
+                    fuselageGeo.rotateZ(Math.PI / 2);
+                    const fuselage = new THREE.Mesh(fuselageGeo, materials.red);
+                    fuselage.userData = { isTarget: true, type: 'body', points: 30, parentGrp: targetObj };
+                    
+                    const wingsGeo = new THREE.BoxGeometry(1.5, 0.1, 4);
+                    const wings = new THREE.Mesh(wingsGeo, materials.white);
+                    wings.position.set(0.2, 0, 0);
+                    wings.userData = fuselage.userData;
+
+                    const tailGeo = new THREE.BoxGeometry(0.8, 0.8, 0.1);
+                    const tail = new THREE.Mesh(tailGeo, materials.white);
+                    tail.position.set(targetObj.userData.speed > 0 ? -1.2 : 1.2, 0.4, 0);
+                    tail.userData = fuselage.userData;
+
+                    const airplaneBullseye = createBullseyeTarget(0.5);
+                    // Mount bullseye on the bottom so it can be shot from below
+                    airplaneBullseye.position.set(0, -0.6, 0); 
+                    airplaneBullseye.children.forEach(c => {
+                        c.userData.parentGrp = targetObj;
+                        c.userData.points = 300;
+                    });
+                    
+                    targetObj.add(fuselage, wings, tail, airplaneBullseye);
+                    
+                    // Keep track of propeller so we can spin it later
+                    const propGeo = new THREE.BoxGeometry(0.1, 1.6, 0.2);
+                    const prop = new THREE.Mesh(propGeo, materials.brown);
+                    prop.position.set(targetObj.userData.speed > 0 ? 1.5 : -1.5, 0, 0);
+                    targetObj.userData.propeller = prop;
+                    targetObj.add(prop);
+                    break;
+
+                case 'golden_duck':
+                    targetObj.userData.speed *= 3.0; // Very Fast
+                    const gDuckBody = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 1.2), materials.gold);
+                    gDuckBody.position.y = 0.4;
+                    gDuckBody.castShadow = true;
+                    gDuckBody.userData = { isTarget: true, type: 'body', points: 500, parentGrp: targetObj };
+                    
+                    const gDuckHead = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), materials.gold);
+                    gDuckHead.position.set(0, 1.1, targetObj.userData.speed > 0 ? 0.3 : -0.3);
+                    gDuckHead.castShadow = true;
+                    gDuckHead.userData = gDuckBody.userData;
+
+                    const gBeak = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.4, 4), materials.orange);
+                    gBeak.rotation.x = Math.PI / 2;
+                    gBeak.position.set(0, 1.1, targetObj.userData.speed > 0 ? 0.7 : -0.7);
+                    gBeak.userData = gDuckBody.userData;
+
+                    // Add a shiny glowing light to the golden duck
+                    const gLight = new THREE.PointLight(0xffcc00, 1.5, 8);
+                    gLight.position.set(0, 1.5, 0);
+
+                    targetObj.add(gDuckBody, gDuckHead, gBeak, gLight);
+                    break;
+
+                case 'tube':
+                    const tubeGeo = new THREE.TorusGeometry(0.6, 0.25, 8, 16);
+                    tubeGeo.rotateX(Math.PI / 2);
+                    const tMat = Math.random() > 0.5 ? materials.pink : materials.green;
+                    const tube = new THREE.Mesh(tubeGeo, tMat);
+                    tube.position.y = 0.1;
+                    tube.userData = { isTarget: true, type: 'tube', points: 30, parentGrp: targetObj };
+                    targetObj.add(tube);
+                    break;
+
+                case 'pingpong':
+                    const tee = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2), materials.brown);
+                    tee.position.y = 1;
+                    tee.userData = { isTarget: false }; 
+                    
+                    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16), materials.white);
+                    ball.position.y = 2.1;
+                    ball.userData = { isTarget: true, type: 'ball', points: 50, parentGrp: targetObj };
+                    
+                    targetObj.userData.ballMesh = ball; 
+                    targetObj.add(tee, ball);
+                    break;
+
+                case 'beachball':
+                    const bbMesh = new THREE.Mesh(new THREE.SphereGeometry(0.8, 16, 16), materials.beachball);
+                    bbMesh.position.y = 0.8;
+                    bbMesh.userData = { isTarget: true, type: 'beachball', points: 80, parentGrp: targetObj };
+                    targetObj.add(bbMesh);
+                    break;
+
+                case 'fish':
+                    const fishGeo = new THREE.ConeGeometry(0.3, 1, 8);
+                    fishGeo.rotateX(Math.PI / 2); 
+                    const fish = new THREE.Mesh(fishGeo, materials.blue);
+                    fish.userData = { isTarget: true, type: 'fish', points: 100, parentGrp: targetObj };
+                    
+                    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.4, 4), materials.orange);
+                    fin.position.set(0, 0.2, -0.2);
+                    fish.add(fin);
+
+                    targetObj.userData.baseY = -2; 
+                    targetObj.position.y = -2;
+                    targetObj.add(fish);
+                    break;
+            }
+
+            // Exclude airplane since its model orientation already factors in speed direction
+            if (targetObj.userData.speed < 0 && type !== 'speedboat' && type !== 'airplane') {
+                targetObj.rotation.y = Math.PI; 
+            }
+
+            scene.add(targetObj);
+            targets.push(targetObj);
+        }
+
+        // --- Game Logic ---
+
+        function startGame() {
+            isPlaying = true;
+            score = 0;
+            timeLeft = 60;
+            updateHUD();
+            
+            targets.forEach(t => scene.remove(t));
+            targets.length = 0;
+
+            gameTimerInterval = setInterval(() => {
+                timeLeft--;
+                updateHUD();
+                if (timeLeft <= 0) endGame();
+            }, 1000);
+        }
+
+        function pauseGame() {
+            isPlaying = false;
+            clearInterval(gameTimerInterval);
+            overlay.style.display = 'flex';
+            titleText.innerText = 'Game Paused';
+            startBtn.innerText = 'Resume';
+        }
+
+        function endGame() {
+            isPlaying = false;
+            controls.unlock();
+            clearInterval(gameTimerInterval);
+            overlay.style.display = 'flex';
+            titleText.innerText = 'Time Up!';
+            document.getElementById('instructions').innerHTML = `
+                <h2 style="font-size: 48px; color: #00ffcc; margin:0;">Final Score: ${score}</h2>
+                <p>Great shooting! Ready for another round?</p>
+            `;
+            startBtn.innerText = 'Play Again';
+
+            // Fire Confetti!
+            confettis.forEach(c => {
+                c.active = true;
+                c.mesh.visible = true;
+                c.mesh.position.set((Math.random() - 0.5) * 20, 15 + Math.random() * 5, -5 - Math.random() * 10);
+                c.velocity.set((Math.random() - 0.5) * 8, -2 - Math.random() * 5, (Math.random() - 0.5) * 8);
+                c.angularVel.set(Math.random() * 0.2, Math.random() * 0.2, Math.random() * 0.2);
+            });
+        }
+
+        function updateHUD() {
+            scoreDisplay.innerText = score;
+            timeDisplay.innerText = timeLeft;
+        }
+
+        function spawnFloatingText(points, isBullseye, position3D) {
+            const div = document.createElement('div');
+            div.className = 'floating-score';
+            if (isBullseye) {
+                div.classList.add('bullseye-text');
+                div.innerText = 'BULLSEYE!\n+' + points;
+            } else {
+                div.innerText = '+' + points;
+            }
+
+            const vector = position3D.clone();
+            vector.project(camera);
+            
+            const x = (vector.x * .5 + .5) * window.innerWidth;
+            const y = -(vector.y * .5 - .5) * window.innerHeight;
+            
+            div.style.left = `${x}px`;
+            div.style.top = `${y}px`;
+            
+            document.getElementById('ui-layer').appendChild(div);
+            
+            setTimeout(() => { div.remove(); }, 1000);
+        }
+
+        function handleHit(intersect) {
+            const mesh = intersect.object;
+            const data = mesh.userData;
+            
+            if (!data.isTarget) return;
+
+            const parent = data.parentGrp;
+            if (parent && !parent.userData.active) return; 
+
+            score += data.points;
+            updateHUD();
+            spawnFloatingText(data.points, data.type === 'bullseye', intersect.point);
+
+            if (parent) {
+                parent.userData.active = false; 
+
+                if (data.type === 'ball') {
+                    parent.userData.ballVelocity = new THREE.Vector3((Math.random()-0.5)*0.2, 0.3, -0.2);
+                } else if (parent.userData.type === 'fish') {
+                    parent.userData.hitDrop = true;
+                } else if (parent.userData.type === 'beachball') {
+                    parent.userData.hitBounce = true;
+                    // Send it flying back and up
+                    parent.userData.velocity = new THREE.Vector3((Math.random()-0.5)*0.5, 0.6, -0.3);
+                } else {
+                    parent.userData.sinking = true;
+                    if (parent.userData.type === 'speedboat') {
+                        parent.rotation.x += Math.PI; // Flip speedboats
+                    }
+                }
+            } else {
+                scene.remove(mesh);
+            }
+        }
+
+        // --- Render Loop ---
+
+        function updateParticles(dt) {
+            // Emitting Water Gun Stream
+            if (isShooting && isPlaying) {
+                // Emit 3 particles per frame to create a highly intense, thick stream
+                for (let k = 0; k < 3; k++) {
+                    const p = waterParticles.find(p => !p.active);
+                    if (p) {
+                        p.active = true;
+                        p.life = 1.5; // Longer life so the particles travel the full distance
+                        p.mesh.visible = true;
+                        
+                        // Exact local coordinates of the newly scaled/shifted gun nozzle
+                        p.mesh.position.set(0.31, -0.41, -0.956);
+                        p.mesh.position.applyMatrix4(camera.matrixWorld);
+                        
+                        const dir = new THREE.Vector3(0, 0, -1);
+                        dir.applyQuaternion(camera.quaternion);
+                        // Very tight spread for a concentrated, laser-like jet
+                        dir.x += (Math.random() - 0.5) * 0.015;
+                        dir.y += (Math.random() - 0.5) * 0.015;
+                        dir.normalize();
+                        
+                        // Double the speed (80) so it reaches the target quickly
+                        p.velocity.copy(dir).multiplyScalar(80); 
+                    }
+                }
+
+                // Instant Raycast hit detection
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(targets, true);
+                if (intersects.length > 0) {
+                    // Create a splash exactly where the invisible raycast hits
+                    createSplash(intersects[0].point, intersects[0].face ? intersects[0].face.normal : new THREE.Vector3(0,1,0), 2);
+                    handleHit(intersects[0]);
+                }
+            }
+
+            // Updating Water Gun Drops
+            waterParticles.forEach(p => {
+                if (p.active) {
+                    p.mesh.position.addScaledVector(p.velocity, dt);
+                    p.velocity.y -= 10 * dt; // Halved the gravity so the stream shoots straighter
+                    p.life -= dt; // Deplete life slower
+                    
+                    // Splash when hitting water level (-0.2 is the pool plane Y)
+                    if (p.mesh.position.y <= -0.2 || p.life <= 0) {
+                        p.active = false;
+                        p.mesh.visible = false;
+                        if (p.mesh.position.y <= -0.2) {
+                            createSplash(p.mesh.position, new THREE.Vector3(0, 1, 0), 2);
+                        }
+                    }
+                }
+            });
+
+            // Updating Splash Particles
+            splashes.forEach(s => {
+                if (s.active) {
+                    s.mesh.position.addScaledVector(s.velocity, dt);
+                    s.velocity.y -= 15 * dt; // gravity
+                    s.life -= dt;
+                    s.mesh.scale.setScalar(Math.max(0.01, s.life * 3)); // Shrink as they die
+
+                    if (s.life <= 0 || s.mesh.position.y <= -0.2) {
+                        s.active = false;
+                        s.mesh.visible = false;
+                    }
+                }
+            });
+
+            // Updating Confetti
+            confettis.forEach(c => {
+                if (c.active) {
+                    c.mesh.position.addScaledVector(c.velocity, dt);
+                    c.mesh.rotation.x += c.angularVel.x;
+                    c.mesh.rotation.y += c.angularVel.y;
+                    c.mesh.rotation.z += c.angularVel.z;
+                    
+                    // Air resistance and slight sway
+                    c.velocity.x *= 0.98;
+                    c.velocity.z *= 0.98;
+                    c.velocity.x += Math.sin(Date.now() * 0.002 + c.mesh.id) * 0.05;
+                    
+                    if (c.mesh.position.y < -2) {
+                        c.active = false;
+                        c.mesh.visible = false;
+                    }
+                }
+            });
+        }
+
+        function updateTargets(dt) {
+            if (isPlaying && Math.random() < 0.04) { 
+                if (targets.length < 18) { 
+                    spawnTarget();
+                }
+            }
+
+            for (let i = targets.length - 1; i >= 0; i--) {
+                const t = targets[i];
+                const type = t.userData.type;
+                t.userData.age += dt;
+
+                // Make all Bullseyes dynamically lock-on and look at the camera position
+                t.children.forEach(child => {
+                    if (child.userData.isBullseyeGroup) {
+                        child.lookAt(camera.position);
+                    }
+                });
+
+                if (t.userData.active) {
+                    // Normal Movement
+                    t.position.x += t.userData.speed * dt;
+                    
+                    if (type === 'beachball') {
+                        // High amplitude bouncing
+                        t.position.y = Math.abs(Math.sin(t.userData.age * 4)) * 2;
+                        t.rotation.x += dt * 0.5;
+                        t.rotation.y += dt;
+                    } else if (type === 'fish') {
+                        // Parabolic jump arc
+                        t.position.y = t.userData.baseY + Math.sin(t.userData.age * 2) * 5;
+                        t.rotation.z = Math.cos(t.userData.age * 2) * 0.5 * (t.userData.speed > 0 ? -1 : 1);
+                        
+                        if (t.userData.age > Math.PI / 2) { 
+                            scene.remove(t);
+                            targets.splice(i, 1);
+                            continue;
+                        }
+                    } else if (type === 'tube') {
+                        t.rotation.y += 1 * dt; 
+                        t.position.y = Math.sin(t.userData.age * 3) * 0.1;
+                    } else if (type === 'airplane') {
+                        t.position.y += Math.sin(t.userData.age * 5) * 0.02; // Slight altitude bob
+                        if (t.userData.propeller) {
+                            t.userData.propeller.rotation.x += 20 * dt; // Spin prop
+                        }
+                    } else if (type === 'golden_duck') {
+                        // Golden duck jumps erratically
+                        t.position.y = Math.abs(Math.sin(t.userData.age * 8)) * 1.5;
+                        t.rotation.y += Math.sin(t.userData.age * 10) * 0.05;
+                    } else {
+                        // Standard bobbing
+                        t.position.y = Math.sin(t.userData.age * 3) * 0.1;
+                    }
+                } else {
+                    // Death Animations
+                    if (type === 'pingpong' && t.userData.ballMesh) {
+                        const ball = t.userData.ballMesh;
+                        ball.position.add(t.userData.ballVelocity);
+                        t.userData.ballVelocity.y -= 0.01; 
+                        if (ball.position.y < -1) t.userData.sinking = true; 
+                    } else if (type === 'airplane') {
+                        t.position.y -= 8 * dt; // Crash down fast
+                        t.rotation.z += 10 * dt;
+                        t.position.x += t.userData.speed * dt * 0.5; // Continue forward momentum
+                        if (t.position.y < -2) t.userData.sinking = true;
+                    } else if (type === 'beachball' && t.userData.hitBounce) {
+                        t.position.add(t.userData.velocity);
+                        t.userData.velocity.y -= 0.02; // Gravity
+                        t.rotation.x += 0.2;
+                        t.rotation.y += 0.2;
+                        if (t.position.y < -3) t.userData.sinking = true;
+                    } else if (t.userData.hitDrop) {
+                        t.position.y -= 5 * dt;
+                        t.rotation.z += 5 * dt;
+                        if (t.position.y < -2) t.userData.sinking = true;
+                    } else if (t.userData.sinking) {
+                        t.position.y -= 2 * dt;
+                        t.rotation.x -= 2 * dt;
+                        if (t.position.y < -2) {
+                            scene.remove(t);
+                            targets.splice(i, 1);
+                            continue;
+                        }
+                    }
+                }
+
+                if (Math.abs(t.position.x) > 30) {
+                    scene.remove(t);
+                    targets.splice(i, 1);
+                }
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = Math.min(clock.getDelta(), 0.1); 
+
+            updateParticles(dt);
+            updateTargets(dt);
+
+            // Animate Twinkling String Lights
+            lightsList.forEach(l => {
+                l.userData.phase += dt * 3;
+                l.intensity = l.userData.baseIntensity + Math.sin(l.userData.phase) * 0.3;
+            });
+
+            // Gently drift dust particles
+            if (dustParticles) {
+                dustParticles.position.y += dt * 0.5;
+                dustParticles.rotation.y += dt * 0.02;
+                // Seamless looping of dust
+                if (dustParticles.position.y > 10) {
+                    dustParticles.position.y = 0;
+                }
+            }
+
+            const waterPool = scene.getObjectByName("WaterPool");
+            if (waterPool && materials.water.normalMap) {
+                // Bobbing the entire water surface slightly
+                waterPool.position.y = -0.2 + Math.sin(Date.now() * 0.002) * 0.05;
+                // Scroll the normal map
+                materials.water.normalMap.offset.x += dt * 0.05;
+                materials.water.normalMap.offset.y += dt * 0.03;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+    </script>
+</body>
+</html>
