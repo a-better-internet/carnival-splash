@@ -33,6 +33,7 @@
         #hud {
             display: flex;
             justify-content: space-between;
+            align-items: flex-start;
             padding: 20px 40px;
             font-size: 36px;
             font-weight: bold;
@@ -42,7 +43,26 @@
         }
         #score-display { color: #ffd700; }
         #time-display { color: #ff4500; }
-        
+        #combo-display {
+            position: absolute;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 26px;
+            font-weight: bold;
+            color: #00ffcc;
+            text-shadow: 3px 3px 0 #000, -1px -1px 0 #000, 1px 1px 0 #000;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 10;
+        }
+        #mute-indicator {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            text-shadow: 2px 2px 0 #000;
+            margin-top: 8px;
+        }
+
         #crosshair {
             position: absolute;
             top: 50%;
@@ -129,7 +149,7 @@
             border: 3px dashed #ffde00;
             box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
         }
-        
+
         .floating-score {
             position: absolute;
             color: #00ffcc;
@@ -141,6 +161,8 @@
             animation: floatUp 1s ease-out forwards;
             transform: translate(-50%, -50%);
             z-index: 15;
+            white-space: pre;
+            text-align: center;
         }
         @keyframes floatUp {
             0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
@@ -151,25 +173,34 @@
             font-size: 50px;
             text-shadow: 3px 3px 0 #fff, 5px 5px 0 #000;
         }
+        .jackpot-text {
+            color: #ffd700;
+            font-size: 56px;
+            text-shadow: 0 0 10px #ff8800, 3px 3px 0 #000;
+        }
     </style>
 </head>
 <body>
     <div id="game-container"></div>
-    
+
     <div id="ui-layer">
         <div id="hud">
-            <div>Score: <span id="score-display">0</span></div>
+            <div>
+                <div>Score: <span id="score-display">0</span></div>
+                <div id="mute-indicator">M: Sound On</div>
+            </div>
             <div>Time: <span id="time-display">60</span>s</div>
         </div>
+        <div id="combo-display"></div>
         <div id="crosshair"></div>
     </div>
 
     <div id="overlay">
         <h1 id="title-text">Carnival Splash</h1>
         <div id="instructions">
-            <p style="color: #00ffcc; font-size: 28px; text-shadow: 2px 2px #000;"><strong>Click & Hold to Shoot!</strong></p>
-            <p>Look around with your mouse. Spray water to knock down targets.</p>
-            <p style="color: #00ffcc; font-size: 20px; text-shadow: 1px 1px #000; margin-bottom: 20px;"><strong>Scroll Mouse Wheel to Zoom In/Out</strong></p>
+            <p style="color: #00ffcc; font-size: 28px; text-shadow: 2px 2px #000;"><strong>Move to Aim &bull; Hold to Spray!</strong></p>
+            <p>Move your mouse (or finger) to aim. Press and hold to spray water and knock down targets.</p>
+            <p style="color: #00ffcc; font-size: 18px; text-shadow: 1px 1px #000; margin-bottom: 20px;"><strong>Scroll to Zoom &bull; Spray Pinwheels to Spin Them &bull; Esc to Pause &bull; M to Mute</strong></p>
             <p style="text-align: left; margin: 0 auto; display: inline-block; font-size: 20px;">
                 ✈️ Stunt Plane: <strong style="color:#ff00ff">300 pts</strong><br>
                 ✨ Golden Duck: <strong style="color:#ffd700; text-shadow: 0 0 5px #ff8800;">500 pts</strong><br>
@@ -179,6 +210,7 @@
                 🏐 Bouncy Beach Ball: <strong>80 pts</strong><br>
                 🏓 Ping Pong Ball: <strong>50 pts</strong><br>
                 🍩 Inner Tube: <strong>30 pts</strong><br>
+                🎡 Pinwheel: <strong style="color:#ff66cc">5 pts &amp; spin!</strong><br>
             </p>
         </div>
         <button class="btn" id="start-btn">Play Now</button>
@@ -186,53 +218,148 @@
 
     <!-- Load Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- Load PointerLockControls -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+    <!-- Cursor-aim controls (no Pointer Lock needed – works in sandboxed frames & touch) -->
 
     <script>
-        // Game State Variables
+        // ============================================================
+        //  Game State
+        // ============================================================
         let score = 0;
         let timeLeft = 60;
-        let isPlaying = false;
+        let isPlaying = false;   // round currently running
+        let isPaused = false;    // round paused (pointer unlocked mid-game)
         let isShooting = false;
-        let gameTimerInterval;
+        let gameTimerInterval = null;
 
-        // Three.js Core Variables
-        let scene, camera, renderer, controls;
+        // Combo system
+        let comboCount = 0;
+        let comboTimer = 0;
+
+        // Three.js Core
+        let scene, camera, renderer;
         let clock = new THREE.Clock();
-        
-        // Game Objects
-        const targets = []; // List of shootable objects
-        const waterParticles = [];
-        const splashes = []; // Splash particle pool
-        const confettis = []; // Confetti particles
-        let waterStreamGroup, splashGroup, confettiGroup, dustParticles;
-        const lightsList = []; // For twinkling lights
-        const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2(0, 0);
 
-        // UI Elements
+        // Cursor-aim look state
+        let lookYaw = 0, lookPitch = 0;       // current camera angles
+        let targetYaw = 0, targetPitch = 0;   // desired angles from cursor
+
+        // Game Objects
+        const targets = [];
+        const pinwheels = [];
+        const waterParticles = [];
+        const splashes = [];
+        const confettis = [];
+        const ripples = [];
+        let waterStreamGroup, splashGroup, confettiGroup, rippleGroup, dustParticles, jetCore;
+        const lightsList = [];
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2(0, 0); // center screen (pointer locked)
+
+        const WATER_Y = -0.2; // pool surface height
+
+        // UI
         const scoreDisplay = document.getElementById('score-display');
         const timeDisplay = document.getElementById('time-display');
         const overlay = document.getElementById('overlay');
         const startBtn = document.getElementById('start-btn');
         const titleText = document.getElementById('title-text');
         const crosshair = document.getElementById('crosshair');
+        const comboDisplay = document.getElementById('combo-display');
+        const muteIndicator = document.getElementById('mute-indicator');
+        const instructionsEl = document.getElementById('instructions');
+        const originalInstructions = instructionsEl.innerHTML;
 
-        // Dynamically create beachball striped texture
+        // ============================================================
+        //  Audio (Web Audio API, synthesised – no external assets)
+        // ============================================================
+        let audioCtx = null;
+        let muted = false;
+        let sprayNoise = null, sprayGain = null;
+
+        function initAudio() {
+            if (audioCtx) return;
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            } catch (e) { audioCtx = null; }
+        }
+        function startSpraySound() {
+            if (!audioCtx || muted) return;
+            if (!sprayNoise) {
+                const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+                sprayNoise = audioCtx.createBufferSource();
+                sprayNoise.buffer = buffer;
+                sprayNoise.loop = true;
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 3200;
+                filter.Q.value = 0.6;
+                sprayGain = audioCtx.createGain();
+                sprayGain.gain.value = 0;
+                sprayNoise.connect(filter);
+                filter.connect(sprayGain);
+                sprayGain.connect(audioCtx.destination);
+                sprayNoise.start();
+            }
+            sprayGain.gain.setTargetAtTime(0.09, audioCtx.currentTime, 0.02);
+        }
+        function stopSpraySound() {
+            if (sprayGain) sprayGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+        }
+        function playTone(freq, dur, type, vol, slideTo) {
+            if (!audioCtx || muted) return;
+            const o = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            o.type = type || 'square';
+            const t = audioCtx.currentTime;
+            o.frequency.setValueAtTime(freq, t);
+            if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+            g.gain.setValueAtTime(vol || 0.12, t);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+            o.connect(g); g.connect(audioCtx.destination);
+            o.start(t); o.stop(t + dur);
+        }
+        function playHit(points, isBullseye) {
+            if (points >= 500) { // jackpot fanfare
+                [523, 659, 784, 1047].forEach((f, i) =>
+                    setTimeout(() => playTone(f, 0.18, 'square', 0.13), i * 80));
+                return;
+            }
+            if (isBullseye) {
+                playTone(880, 0.12, 'triangle', 0.14, 1400);
+                setTimeout(() => playTone(1320, 0.12, 'triangle', 0.1), 70);
+                return;
+            }
+            const base = points >= 100 ? 520 : 360;
+            playTone(base, 0.12, 'square', 0.1, base * 1.5);
+        }
+        function playGameOver() {
+            [392, 523, 659, 784].forEach((f, i) =>
+                setTimeout(() => playTone(f, 0.25, 'triangle', 0.12), i * 140));
+        }
+        function setMuted(m) {
+            muted = m;
+            muteIndicator.innerText = muted ? 'M: Sound Off' : 'M: Sound On';
+            if (muted) stopSpraySound();
+        }
+
+        // ============================================================
+        //  Textures & Materials
+        // ============================================================
+        // Beachball stripes
         const bbCanvas = document.createElement('canvas');
         bbCanvas.width = 256; bbCanvas.height = 128;
         const bbCtx = bbCanvas.getContext('2d');
         const bbColors = ['#ff0033', '#ffffff', '#00aaff', '#ffcc00', '#ffffff', '#00ffcc'];
-        for(let j=0; j<6; j++) {
+        for (let j = 0; j < 6; j++) {
             bbCtx.fillStyle = bbColors[j];
-            bbCtx.fillRect(j * (256/6), 0, 256/6, 128);
+            bbCtx.fillRect(j * (256 / 6), 0, 256 / 6, 128);
         }
         const bbTex = new THREE.CanvasTexture(bbCanvas);
         bbTex.wrapS = THREE.RepeatWrapping;
         bbTex.wrapT = THREE.RepeatWrapping;
 
-        // Shared Materials
         const materials = {
             red: new THREE.MeshLambertMaterial({ color: 0xff0033 }),
             white: new THREE.MeshLambertMaterial({ color: 0xffffff }),
@@ -240,53 +367,55 @@
             orange: new THREE.MeshLambertMaterial({ color: 0xff6600 }),
             blue: new THREE.MeshLambertMaterial({ color: 0x00aaff }),
             brown: new THREE.MeshLambertMaterial({ color: 0x8b4513 }),
-            pink: new THREE.MeshLambertMaterial({ color: 0xff00ff }),
-            green: new THREE.MeshLambertMaterial({ color: 0x00ff00 }),
-            gold: new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 1.0, roughness: 0.2, emissive: 0x443300 }),
-            beachball: new THREE.MeshLambertMaterial({ map: bbTex }),
-            water: null 
+            pink: new THREE.MeshLambertMaterial({ color: 0xff44cc }),
+            green: new THREE.MeshLambertMaterial({ color: 0x22cc44 }),
+            black: new THREE.MeshLambertMaterial({ color: 0x111111 }),
+            gold: new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 1.0, roughness: 0.2, emissive: 0x553300 }),
+            fishBlue: new THREE.MeshStandardMaterial({ color: 0x1188ff, metalness: 0.4, roughness: 0.3, emissive: 0x002244 }),
+            beachball: new THREE.MeshPhongMaterial({ map: bbTex, shininess: 70, specular: 0x888888 }),
+            water: null
         };
 
         init();
         animate();
 
+        // ============================================================
+        //  Init
+        // ============================================================
         function init() {
-            // 1. Scene Setup
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB); // Sky blue
-            scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 30, 110);
 
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 6, 12); 
+            camera.position.set(0, 6, 12);
+            camera.rotation.order = 'YXZ'; // clean yaw-then-pitch for cursor look
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
-            renderer.outputEncoding = THREE.sRGBEncoding; 
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.outputEncoding = THREE.sRGBEncoding;
             document.getElementById('game-container').appendChild(renderer.domElement);
 
-            // 2. Controls
-            controls = new THREE.PointerLockControls(camera, document.body);
-            
+            crosshair.style.display = 'none';
+
             startBtn.addEventListener('click', () => {
-                controls.lock();
-            });
-
-            controls.addEventListener('lock', () => {
-                if (!isPlaying) startGame();
+                initAudio();
+                if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
                 overlay.style.display = 'none';
+                crosshair.style.display = 'block';
+                document.body.style.cursor = 'none';
+                if (isPaused) resumeGame();
+                else startGame();
             });
 
-            controls.addEventListener('unlock', () => {
-                if (isPlaying) pauseGame();
-            });
-
-            // 3. Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
             scene.add(ambientLight);
 
-            const dirLight = new THREE.DirectionalLight(0xffdfaa, 0.8); 
+            const dirLight = new THREE.DirectionalLight(0xffdfaa, 0.85);
             dirLight.position.set(10, 20, 10);
             dirLight.castShadow = true;
             dirLight.shadow.camera.top = 30;
@@ -297,103 +426,130 @@
             dirLight.shadow.mapSize.height = 2048;
             scene.add(dirLight);
 
-            const spotLight = new THREE.SpotLight(0xffffff, 0.8);
-            spotLight.position.set(0, 30, 10);
+            const spotLight = new THREE.SpotLight(0xffffff, 0.7);
+            spotLight.position.set(0, 30, 14);
             spotLight.angle = Math.PI / 4;
-            spotLight.penumbra = 0.1;
+            spotLight.penumbra = 0.2;
             spotLight.decay = 2;
             spotLight.distance = 200;
             spotLight.castShadow = true;
             scene.add(spotLight);
 
-            // 4. Environment
             createEnvironment();
-
-            // 5. Particles & Water Gun
             createParticleSystems();
             createWaterGun();
 
-            // 6. Interaction
-            document.addEventListener('mousedown', (e) => {
-                if (controls.isLocked && e.button === 0) {
-                    isShooting = true;
-                    crosshair.classList.add('shooting');
-                }
-            });
-            document.addEventListener('mouseup', (e) => {
-                if (e.button === 0) {
-                    isShooting = false;
-                    crosshair.classList.remove('shooting');
-                }
-            });
+            // Interaction (pointer events => works for mouse and touch, no pointer lock)
+            function setAimFromEvent(e) {
+                const nx = (e.clientX / window.innerWidth) * 2 - 1;
+                const ny = -((e.clientY / window.innerHeight) * 2 - 1);
+                mouse.x = nx;
+                mouse.y = ny;
+                crosshair.style.left = e.clientX + 'px';
+                crosshair.style.top = e.clientY + 'px';
+                // gentle look toward where you're aiming
+                targetYaw = -nx * 0.32;
+                targetPitch = ny * 0.20;
+            }
 
-            // Zoom Feature
+            document.addEventListener('pointermove', (e) => {
+                if (isPlaying) setAimFromEvent(e);
+            });
+            document.addEventListener('pointerdown', (e) => {
+                if (!isPlaying) return;
+                setAimFromEvent(e);
+                isShooting = true;
+                crosshair.classList.add('shooting');
+                startSpraySound();
+            });
+            function stopShooting() {
+                isShooting = false;
+                crosshair.classList.remove('shooting');
+                stopSpraySound();
+            }
+            document.addEventListener('pointerup', stopShooting);
+            document.addEventListener('pointercancel', stopShooting);
+            window.addEventListener('blur', () => { if (isPlaying) stopShooting(); });
+
             document.addEventListener('wheel', (e) => {
-                if (!controls.isLocked) return;
+                if (!isPlaying) return;
                 camera.fov += e.deltaY * 0.05;
-                camera.fov = Math.max(30, Math.min(110, camera.fov)); 
+                camera.fov = Math.max(30, Math.min(110, camera.fov));
                 camera.updateProjectionMatrix();
+            }, { passive: true });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'm' || e.key === 'M') setMuted(!muted);
+                if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') && isPlaying) pauseGame();
             });
 
             window.addEventListener('resize', onWindowResize);
         }
 
+        // ============================================================
+        //  Environment
+        // ============================================================
         function createEnvironment() {
-            // Ground Floor
-            const floorGeo = new THREE.PlaneGeometry(120, 120);
-            const floorMat = new THREE.MeshLambertMaterial({ color: 0x8b4513 });
+            // Ground
+            const floorGeo = new THREE.PlaneGeometry(160, 160);
+            const floorMat = new THREE.MeshLambertMaterial({ color: 0x6b4423 });
             const floor = new THREE.Mesh(floorGeo, floorMat);
             floor.rotation.x = -Math.PI / 2;
             floor.position.y = -0.5;
+            floor.receiveShadow = true;
             scene.add(floor);
 
-            // Procedural Water Normal Map
+            // Procedural water normal map
             const waterCanvas = document.createElement('canvas');
-            waterCanvas.width = 512;
-            waterCanvas.height = 512;
-            const waterContext = waterCanvas.getContext('2d');
-            for (let x = 0; x < 512; x++) {
-                for (let y = 0; y < 512; y++) {
-                    const val = Math.floor(Math.random() * 255);
-                    waterContext.fillStyle = `rgb(${val}, ${val}, ${val})`;
-                    waterContext.fillRect(x, y, 1, 1);
-                }
+            waterCanvas.width = 256;
+            waterCanvas.height = 256;
+            const wc = waterCanvas.getContext('2d');
+            const img = wc.createImageData(256, 256);
+            for (let i = 0; i < img.data.length; i += 4) {
+                const v = Math.floor(Math.random() * 255);
+                img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
             }
+            wc.putImageData(img, 0, 0);
             const waterNormalMap = new THREE.CanvasTexture(waterCanvas);
             waterNormalMap.wrapS = THREE.RepeatWrapping;
             waterNormalMap.wrapT = THREE.RepeatWrapping;
-            waterNormalMap.repeat.set(4, 4);
+            waterNormalMap.repeat.set(6, 6);
+
+            // Second layer normal map for cross-rippling
+            const waterNormalMap2 = waterNormalMap.clone();
+            waterNormalMap2.needsUpdate = true;
+            waterNormalMap2.repeat.set(3, 3);
 
             materials.water = new THREE.MeshPhysicalMaterial({
-                color: 0x0055ff, // Bluer, more vibrant pool color
-                metalness: 0.1,
-                roughness: 0.1, // Smoother for better lighting reflection
+                color: 0x0066cc,
+                metalness: 0.2,
+                roughness: 0.08,
                 normalMap: waterNormalMap,
-                normalScale: new THREE.Vector2(0.3, 0.3), // Calmer waves to let the color pop
-                transmission: 0.6, // Less transparent so the pool looks deeper
+                normalScale: new THREE.Vector2(0.35, 0.35),
+                transmission: 0.5,
                 opacity: 0.95,
                 transparent: true,
+                clearcoat: 0.6,
+                clearcoatRoughness: 0.2,
                 envMapIntensity: 1.0,
             });
 
-            // The Water Pool - Shifted back to strictly stay behind counter
-            const waterGeo = new THREE.PlaneGeometry(100, 50);
+            const waterGeo = new THREE.PlaneGeometry(100, 50, 1, 1);
             const water = new THREE.Mesh(waterGeo, materials.water);
             water.rotation.x = -Math.PI / 2;
-            // Center is -19, depth is 50. Front edge reaches z = 6. Counter starts at z = 7.
-            water.position.set(0, -0.2, -19); 
+            water.position.set(0, WATER_Y, -19);
             water.receiveShadow = true;
             water.name = "WaterPool";
             scene.add(water);
 
-            // Enclosed Carnival Tent Walls
+            // Tent walls
             const tentGeo = new THREE.CylinderGeometry(50, 50, 40, 32, 1, true);
             const canvas = document.createElement('canvas');
             canvas.width = 1024;
             canvas.height = 512;
             const context = canvas.getContext('2d');
-            for(let i=0; i<20; i++) {
-                context.fillStyle = i % 2 === 0 ? '#ff0033' : '#ffffff';
+            for (let i = 0; i < 20; i++) {
+                context.fillStyle = i % 2 === 0 ? '#cc0033' : '#fff4e8';
                 context.fillRect(i * 51.2, 0, 51.2, 512);
             }
             const stripeTex = new THREE.CanvasTexture(canvas);
@@ -411,44 +567,131 @@
             tentRoof.position.set(0, 35, 0);
             scene.add(tentRoof);
 
-            // Counter - Made 50% thinner so you can see more water
-            const counterGeo = new THREE.BoxGeometry(20, 4, 1);
-            const counterMat = new THREE.MeshLambertMaterial({ color: 0xaa2222 });
-            const counter = new THREE.Mesh(counterGeo, counterMat);
-            counter.position.set(0, 2, 8); 
+            // ---- Counter front (carnival stall) with painted texture ----
+            const cCanvas = document.createElement('canvas');
+            cCanvas.width = 1024; cCanvas.height = 256;
+            const cc = cCanvas.getContext('2d');
+            // base
+            cc.fillStyle = '#8a1226'; cc.fillRect(0, 0, 1024, 256);
+            // bold vertical candy stripes
+            const stripeW = 1024 / 16;
+            for (let i = 0; i < 16; i++) {
+                cc.fillStyle = i % 2 === 0 ? '#b81d35' : '#f3e3c8';
+                cc.fillRect(i * stripeW, 0, stripeW, 256);
+            }
+            // top scalloped trim band
+            cc.fillStyle = '#ffd23f';
+            cc.fillRect(0, 0, 1024, 26);
+            cc.fillStyle = '#e9b400';
+            for (let x = 0; x <= 1024; x += 48) {
+                cc.beginPath(); cc.arc(x, 26, 24, 0, Math.PI); cc.fill();
+            }
+            // wavy teal "water" band near the bottom
+            cc.fillStyle = '#1f9bd6';
+            cc.beginPath();
+            cc.moveTo(0, 200);
+            for (let x = 0; x <= 1024; x += 32) cc.lineTo(x, 200 + Math.sin(x * 0.03) * 12);
+            cc.lineTo(1024, 256); cc.lineTo(0, 256); cc.closePath(); cc.fill();
+            cc.fillStyle = '#5fc8f5';
+            cc.beginPath();
+            cc.moveTo(0, 214);
+            for (let x = 0; x <= 1024; x += 32) cc.lineTo(x, 214 + Math.sin(x * 0.03 + 1) * 10);
+            cc.lineTo(1024, 256); cc.lineTo(0, 256); cc.closePath(); cc.fill();
+            // painted white water droplets
+            cc.fillStyle = 'rgba(255,255,255,0.85)';
+            for (let i = 0; i < 26; i++) {
+                const dx = Math.random() * 1024, dy = 60 + Math.random() * 110, dr = 3 + Math.random() * 7;
+                cc.beginPath(); cc.arc(dx, dy, dr, 0, Math.PI * 2); cc.fill();
+            }
+            // rivet studs
+            cc.fillStyle = '#caa64a';
+            for (let x = 24; x < 1024; x += 80) {
+                cc.beginPath(); cc.arc(x, 44, 6, 0, Math.PI * 2); cc.fill();
+                cc.beginPath(); cc.arc(x, 180, 6, 0, Math.PI * 2); cc.fill();
+            }
+            const counterTex = new THREE.CanvasTexture(cCanvas);
+
+            const counterSide = new THREE.MeshLambertMaterial({ color: 0x7a0f1f });
+            const counterFrontMat = new THREE.MeshLambertMaterial({ map: counterTex });
+            // Box face order: +x, -x, +y, -y, +z, -z  (front toward player is +z)
+            const counterMats = [counterSide, counterSide, counterSide, counterSide, counterFrontMat, counterSide];
+            const counter = new THREE.Mesh(new THREE.BoxGeometry(22, 4, 1), counterMats);
+            counter.position.set(0, 2, 8);
             counter.castShadow = true;
             counter.receiveShadow = true;
             scene.add(counter);
-            
-            const counterTopGeo = new THREE.BoxGeometry(21, 0.5, 1.5);
-            const counterTopMat = new THREE.MeshLambertMaterial({ color: 0xd2b48c });
-            const counterTop = new THREE.Mesh(counterTopGeo, counterTopMat);
-            counterTop.position.set(0, 4.25, 8); 
+
+            // ---- Counter top: wet wooden ledge ----
+            const tCanvas = document.createElement('canvas');
+            tCanvas.width = 1024; tCanvas.height = 128;
+            const tcx = tCanvas.getContext('2d');
+            tcx.fillStyle = '#caa06a'; tcx.fillRect(0, 0, 1024, 128);
+            // plank seams + grain
+            tcx.strokeStyle = 'rgba(90,55,25,0.55)'; tcx.lineWidth = 3;
+            for (let x = 0; x < 1024; x += 128) { tcx.beginPath(); tcx.moveTo(x, 0); tcx.lineTo(x, 128); tcx.stroke(); }
+            tcx.strokeStyle = 'rgba(120,80,40,0.35)'; tcx.lineWidth = 1;
+            for (let i = 0; i < 60; i++) {
+                const y = Math.random() * 128;
+                tcx.beginPath(); tcx.moveTo(0, y);
+                tcx.bezierCurveTo(300, y + (Math.random() - 0.5) * 8, 700, y + (Math.random() - 0.5) * 8, 1024, y);
+                tcx.stroke();
+            }
+            // wet sheen puddles
+            tcx.fillStyle = 'rgba(170,225,255,0.35)';
+            for (let i = 0; i < 14; i++) {
+                tcx.beginPath();
+                tcx.ellipse(Math.random() * 1024, Math.random() * 128, 18 + Math.random() * 26, 6 + Math.random() * 8, 0, 0, Math.PI * 2);
+                tcx.fill();
+            }
+            const topTex = new THREE.CanvasTexture(tCanvas);
+            const counterTop = new THREE.Mesh(
+                new THREE.BoxGeometry(23, 0.5, 1.6),
+                new THREE.MeshPhongMaterial({ map: topTex, shininess: 60, specular: 0x777777 })
+            );
+            counterTop.position.set(0, 4.25, 8);
+            counterTop.receiveShadow = true;
             scene.add(counterTop);
 
-            // Add Atmospheric Room Details
+            // ---- Metal kick rail along the bottom front edge ----
+            const rail = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.12, 0.12, 22, 12),
+                new THREE.MeshStandardMaterial({ color: 0xbfc4cc, metalness: 0.9, roughness: 0.3 })
+            );
+            rail.rotation.z = Math.PI / 2;
+            rail.position.set(0, 0.5, 8.55);
+            scene.add(rail);
+            // rail bracket studs
+            for (let x = -10; x <= 10; x += 5) {
+                const stud = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.16, 10, 10),
+                    new THREE.MeshStandardMaterial({ color: 0xbfc4cc, metalness: 0.9, roughness: 0.3 })
+                );
+                stud.position.set(x, 0.5, 8.6);
+                scene.add(stud);
+            }
+
             createAtmosphere();
+            createPinwheels();
         }
 
         function createAtmosphere() {
-            // Hanging String Lights
-            const lightGeo = new THREE.SphereGeometry(0.15, 8, 8);
-            const lightMat = new THREE.MeshBasicMaterial({ color: 0xffffee });
-            
-            for(let i=0; i<15; i++) {
-                const t = i / 14;
-                const x = -25 + t * 50;
-                // Create a drooping curved line
-                const y = 14 - Math.sin(t * Math.PI) * 4; 
+            // Hanging string lights with colored bulbs
+            const bulbColors = [0xffffee, 0xff5555, 0x55aaff, 0xffdd55, 0x55ffaa];
+            for (let i = 0; i < 21; i++) {
+                const t = i / 20;
+                const x = -28 + t * 56;
+                const y = 14 - Math.sin(t * Math.PI) * 4;
                 const z = -5;
-                
-                const bulb = new THREE.Mesh(lightGeo, lightMat);
+                const col = bulbColors[i % bulbColors.length];
+                const bulb = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.18, 8, 8),
+                    new THREE.MeshBasicMaterial({ color: col })
+                );
                 bulb.position.set(x, y, z);
                 scene.add(bulb);
-                
-                // Add actual glowing light to a few bulbs
+
                 if (i % 3 === 0) {
-                    const pl = new THREE.PointLight(0xfff0c0, 0.5, 15);
+                    const pl = new THREE.PointLight(col, 0.5, 16);
                     pl.position.set(x, y, z);
                     pl.userData = { baseIntensity: 0.5, phase: Math.random() * Math.PI * 2 };
                     scene.add(pl);
@@ -456,107 +699,196 @@
                 }
             }
 
-            // Decorative Carnival Balloons on the sides
+            // Bunting / pennant flags strung across the front top
+            createBunting(-24, 18, 6, 24, 18, 6, 16);
+            createBunting(-26, 13, 11, 0, 16, 11, 9);
+            createBunting(0, 16, 11, 26, 13, 11, 9);
+
+            // Decorative balloons
             const balloonGeo = new THREE.SphereGeometry(0.6, 16, 16);
             balloonGeo.scale(1, 1.2, 1);
             const colors = [0xff0033, 0x00aaff, 0xffcc00, 0x00ffcc, 0xff00ff];
-            
-            for(let i=0; i<8; i++) {
+            for (let i = 0; i < 10; i++) {
                 const bMat = new THREE.MeshPhysicalMaterial({
-                    color: colors[i % colors.length], roughness: 0.2, transmission: 0.5, transparent: true, opacity: 0.9
+                    color: colors[i % colors.length], roughness: 0.2, transmission: 0.4, transparent: true, opacity: 0.92,
+                    clearcoat: 1.0
                 });
                 const balloon = new THREE.Mesh(balloonGeo, bMat);
-                
-                const x = i < 4 ? -12 - Math.random() * 4 : 12 + Math.random() * 4;
-                const y = 5 + Math.random() * 3;
+                const x = i < 5 ? -12 - Math.random() * 5 : 12 + Math.random() * 5;
+                const y = 5 + Math.random() * 4;
                 const z = 6 + Math.random() * 3;
-                
                 balloon.position.set(x, y, z);
-                
-                // Balloon Knot
+                balloon.userData = { bobPhase: Math.random() * Math.PI * 2, baseY: y };
+
                 const knot = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.2, 4), bMat);
-                knot.position.y = -0.7;
-                knot.rotation.x = Math.PI;
-                balloon.add(knot);
-
-                // Balloon String
-                const stringGeo = new THREE.CylinderGeometry(0.01, 0.01, 3);
-                const stringMat = new THREE.MeshBasicMaterial({color: 0xffffff});
-                const str = new THREE.Mesh(stringGeo, stringMat);
-                str.position.y = -2;
-                balloon.add(str);
-
+                knot.position.y = -0.75; knot.rotation.x = Math.PI; balloon.add(knot);
+                const str = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 3),
+                    new THREE.MeshBasicMaterial({ color: 0xffffff }));
+                str.position.y = -2; balloon.add(str);
                 scene.add(balloon);
+                lightsList.push({ isBalloon: true, mesh: balloon });
             }
 
-            // Ambient Dust Particles for atmosphere
+            // Ambient dust motes
             const dustGeo = new THREE.BufferGeometry();
             const dustCount = 400;
             const dustPos = new Float32Array(dustCount * 3);
-            for(let i=0; i<dustCount; i++) {
-                dustPos[i*3] = (Math.random() - 0.5) * 80;     // x
-                dustPos[i*3+1] = Math.random() * 25;           // y
-                dustPos[i*3+2] = -25 + Math.random() * 40;     // z
+            for (let i = 0; i < dustCount; i++) {
+                dustPos[i * 3] = (Math.random() - 0.5) * 80;
+                dustPos[i * 3 + 1] = Math.random() * 25;
+                dustPos[i * 3 + 2] = -25 + Math.random() * 40;
             }
             dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
-            const dustMat = new THREE.PointsMaterial({color: 0xffffee, size: 0.15, transparent: true, opacity: 0.4});
+            const dustMat = new THREE.PointsMaterial({ color: 0xffffee, size: 0.15, transparent: true, opacity: 0.4 });
             dustParticles = new THREE.Points(dustGeo, dustMat);
             scene.add(dustParticles);
         }
 
+        function createBunting(x1, y1, z1, x2, y2, z2, count) {
+            const flagColors = [0xff3355, 0xffcc00, 0x33ccff, 0x33ff99, 0xff66cc];
+            // string
+            const start = new THREE.Vector3(x1, y1, z1);
+            const end = new THREE.Vector3(x2, y2, z2);
+            for (let i = 0; i <= count; i++) {
+                const t = i / count;
+                const p = new THREE.Vector3().lerpVectors(start, end, t);
+                p.y -= Math.sin(t * Math.PI) * 2.5; // droop
+                if (i < count) {
+                    // triangular pennant
+                    const shape = new THREE.Shape();
+                    shape.moveTo(-0.45, 0);
+                    shape.lineTo(0.45, 0);
+                    shape.lineTo(0, -1.1);
+                    shape.lineTo(-0.45, 0);
+                    const geo = new THREE.ShapeGeometry(shape);
+                    const mat = new THREE.MeshLambertMaterial({
+                        color: flagColors[i % flagColors.length], side: THREE.DoubleSide
+                    });
+                    const flag = new THREE.Mesh(geo, mat);
+                    flag.position.copy(p);
+                    flag.position.y -= 0.1;
+                    scene.add(flag);
+                }
+            }
+        }
+
+        // ============================================================
+        //  Pinwheels  (spin when sprayed)
+        // ============================================================
+        function makePinwheelHead() {
+            const head = new THREE.Group();
+            const colors = [0xff0033, 0xffcc00, 0x00aaff, 0x00ffcc, 0xff00ff, 0xffffff];
+            const vanes = 6;
+            for (let i = 0; i < vanes; i++) {
+                const shape = new THREE.Shape();
+                shape.moveTo(0, 0);
+                shape.lineTo(0.55, 0.18);
+                shape.lineTo(0.5, 0.55);
+                shape.lineTo(0, 0);
+                const geo = new THREE.ShapeGeometry(shape);
+                const mat = new THREE.MeshLambertMaterial({ color: colors[i % colors.length], side: THREE.DoubleSide });
+                const vane = new THREE.Mesh(geo, mat);
+                vane.rotation.z = (i / vanes) * Math.PI * 2;
+                head.add(vane);
+            }
+            const hub = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), materials.yellow);
+            head.add(hub);
+            return head;
+        }
+
+        function createPinwheel(x, headY, z, scale) {
+            const g = new THREE.Group();
+            const postH = headY + 0.5; // base sits on floor (-0.5)
+            const post = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.08, 0.12, postH, 8),
+                new THREE.MeshLambertMaterial({ color: 0xeeeeee })
+            );
+            post.position.y = -0.5 + postH / 2;
+            post.castShadow = true;
+            g.add(post);
+
+            const head = makePinwheelHead();
+            head.position.set(0, headY, 0.18);
+            head.scale.setScalar(scale);
+            g.add(head);
+
+            g.position.set(x, 0, z);
+            g.userData = { isPinwheel: true, head: head, spinVel: 0.6, cooldown: 0 };
+            g.traverse(o => { if (o.isMesh) o.userData.pinwheelRef = g; });
+            scene.add(g);
+            pinwheels.push(g);
+        }
+
+        function createPinwheels() {
+            createPinwheel(-15, 5.5, -19, 1.5);
+            createPinwheel(15, 4.5, -19, 1.5);
+            createPinwheel(-8, 6.5, -23, 1.3);
+            createPinwheel(8, 6.5, -23, 1.3);
+            createPinwheel(0, 4.0, -16, 1.1);
+        }
+
+        // ============================================================
+        //  Particle systems
+        // ============================================================
         function createParticleSystems() {
-            // Water Stream Particles
+            // Water stream — bright, glowing droplets so the jet reads clearly
             waterStreamGroup = new THREE.Group();
             scene.add(waterStreamGroup);
-            
-            const dropletGeo = new THREE.SphereGeometry(0.05, 4, 4);
-            const dropletMat = new THREE.MeshPhysicalMaterial({
-                color: 0x00ffff, transparent: true, opacity: 0.8, transmission: 0.9, roughness: 0.1
+            const dropletGeo = new THREE.SphereGeometry(0.11, 8, 8);
+            const dropletMat = new THREE.MeshStandardMaterial({
+                color: 0xcdf2ff, emissive: 0x2f86c4, emissiveIntensity: 0.55,
+                roughness: 0.2, metalness: 0.0, transparent: true, opacity: 0.96
             });
-            
-            // Increased from 60 to 200 for a denser, longer continuous stream
-            for (let i = 0; i < 200; i++) {
+            for (let i = 0; i < 340; i++) {
                 const drop = new THREE.Mesh(dropletGeo, dropletMat);
                 drop.visible = false;
-                waterParticles.push({
-                    mesh: drop, active: false, velocity: new THREE.Vector3(), life: 0
-                });
+                waterParticles.push({ mesh: drop, active: false, velocity: new THREE.Vector3(), life: 0 });
                 waterStreamGroup.add(drop);
             }
 
-            // Splash Particles
+            // Splashes
             splashGroup = new THREE.Group();
             scene.add(splashGroup);
-            const splashGeo = new THREE.SphereGeometry(0.04, 4, 4);
-            
-            for (let i = 0; i < 200; i++) {
-                const s = new THREE.Mesh(splashGeo, dropletMat); // Reusing water material
+            const splashGeo = new THREE.SphereGeometry(0.08, 6, 6);
+            for (let i = 0; i < 280; i++) {
+                const s = new THREE.Mesh(splashGeo, dropletMat);
                 s.visible = false;
-                splashes.push({
-                    mesh: s, active: false, velocity: new THREE.Vector3(), life: 0
-                });
+                splashes.push({ mesh: s, active: false, velocity: new THREE.Vector3(), life: 0 });
                 splashGroup.add(s);
             }
 
-            // Confetti Particles (for winning/game over)
+            // Ripple rings on the water surface
+            rippleGroup = new THREE.Group();
+            scene.add(rippleGroup);
+            for (let i = 0; i < 50; i++) {
+                const geo = new THREE.RingGeometry(0.12, 0.2, 24);
+                const mat = new THREE.MeshBasicMaterial({
+                    color: 0xcceeff, transparent: true, opacity: 0, side: THREE.DoubleSide
+                });
+                const m = new THREE.Mesh(geo, mat);
+                m.rotation.x = -Math.PI / 2;
+                m.visible = false;
+                ripples.push({ mesh: m, active: false, life: 0, maxLife: 0.8 });
+                rippleGroup.add(m);
+            }
+
+            // Confetti
             confettiGroup = new THREE.Group();
             scene.add(confettiGroup);
             const confettiGeo = new THREE.PlaneGeometry(0.2, 0.2);
             const confColors = [0xff0033, 0x00aaff, 0xffcc00, 0x00ffcc, 0xff00ff];
-            for (let i = 0; i < 150; i++) {
+            for (let i = 0; i < 180; i++) {
                 const cMat = new THREE.MeshBasicMaterial({ color: confColors[i % confColors.length], side: THREE.DoubleSide });
                 const mesh = new THREE.Mesh(confettiGeo, cMat);
                 mesh.visible = false;
-                confettis.push({
-                    mesh: mesh, active: false, velocity: new THREE.Vector3(), angularVel: new THREE.Vector3()
-                });
+                confettis.push({ mesh: mesh, active: false, velocity: new THREE.Vector3(), angularVel: new THREE.Vector3() });
                 confettiGroup.add(mesh);
             }
         }
 
         function createWaterGun() {
             const gunGroup = new THREE.Group();
-            
+
             const barrelGeo = new THREE.CylinderGeometry(0.15, 0.2, 1.5, 16);
             barrelGeo.rotateX(Math.PI / 2);
             const barrel = new THREE.Mesh(barrelGeo, materials.blue);
@@ -568,72 +900,114 @@
             tank.position.set(0.5, -0.2, -0.6);
             gunGroup.add(tank);
 
+            // translucent water in the tank
+            const tankWater = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.26, 0.26, 0.6, 16),
+                new THREE.MeshPhysicalMaterial({ color: 0x00aaff, transparent: true, opacity: 0.6, transmission: 0.7 })
+            );
+            tankWater.position.set(0.5, -0.3, -0.6);
+            gunGroup.add(tankWater);
+
             const nozzleGeo = new THREE.CylinderGeometry(0.05, 0.15, 0.3, 16);
             nozzleGeo.rotateX(Math.PI / 2);
             const nozzle = new THREE.Mesh(nozzleGeo, materials.orange);
             nozzle.position.set(0.5, -0.5, -1.8);
             gunGroup.add(nozzle);
 
-            // Scale down the gun by 30% (from 0.6 down to 0.42)
+            // handle / grip
+            const gripGeo = new THREE.BoxGeometry(0.18, 0.7, 0.3);
+            const grip = new THREE.Mesh(gripGeo, materials.red);
+            grip.position.set(0.5, -0.95, -0.3);
+            grip.rotation.x = 0.3;
+            gunGroup.add(grip);
+
             gunGroup.scale.set(0.42, 0.42, 0.42);
-            // Offset it slightly so it still looks naturally held after shrinking
-            gunGroup.position.set(0.1, -0.2, -0.2); 
-            
+            gunGroup.position.set(0.1, -0.2, -0.2);
+
             camera.add(gunGroup);
             scene.add(camera);
+
+            // Glowing pressurized jet core (a tapered translucent stream from the muzzle)
+            const jetLen = 5;
+            const jetGeo = new THREE.CylinderGeometry(0.03, 0.13, jetLen, 14, 1, true);
+            const jetMat = new THREE.MeshBasicMaterial({
+                color: 0xbfefff, transparent: true, opacity: 0.45,
+                blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+            });
+            jetCore = new THREE.Mesh(jetGeo, jetMat);
+            jetCore.userData = { len: jetLen };
+            jetCore.visible = false;
+            scene.add(jetCore);
         }
 
-        function createSplash(position, normal = new THREE.Vector3(0, 1, 0), count = 5) {
+        function createSplash(position, normal, count) {
+            normal = normal || new THREE.Vector3(0, 1, 0);
+            count = count || 5;
             let emitted = 0;
             for (let i = 0; i < splashes.length; i++) {
                 if (emitted >= count) break;
                 const s = splashes[i];
                 if (!s.active) {
                     s.active = true;
-                    s.life = 0.3 + Math.random() * 0.3;
+                    s.life = 0.3 + Math.random() * 0.35;
                     s.mesh.position.copy(position);
                     s.mesh.visible = true;
                     s.mesh.scale.setScalar(1);
-
                     s.velocity.copy(normal).multiplyScalar(3 + Math.random() * 4);
                     s.velocity.x += (Math.random() - 0.5) * 5;
                     s.velocity.z += (Math.random() - 0.5) * 5;
-                    
-                    // Always bias splashes slightly upwards
-                    s.velocity.y = Math.abs(s.velocity.y) + 2; 
-
+                    s.velocity.y = Math.abs(s.velocity.y) + 2.5;
                     emitted++;
                 }
             }
         }
 
-        // --- Target Factory ---
+        function spawnRipple(x, z) {
+            for (let i = 0; i < ripples.length; i++) {
+                const r = ripples[i];
+                if (!r.active) {
+                    r.active = true;
+                    r.life = 0;
+                    r.maxLife = 0.7 + Math.random() * 0.3;
+                    r.mesh.position.set(x, WATER_Y + 0.02, z);
+                    r.mesh.scale.setScalar(1);
+                    r.mesh.visible = true;
+                    r.mesh.material.opacity = 0.7;
+                    return;
+                }
+            }
+        }
 
-        function createBullseyeTarget(radius) {
+        // ============================================================
+        //  Target Factory
+        // ============================================================
+        function createBullseyeTarget(radius, points) {
             const group = new THREE.Group();
-            group.userData.isBullseyeGroup = true; // Tag for 'lookAt' logic
-
-            const r1 = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.1, 16), materials.red);
-            const r2 = new THREE.Mesh(new THREE.CylinderGeometry(radius*0.6, radius*0.6, 0.12, 16), materials.white);
-            const r3 = new THREE.Mesh(new THREE.CylinderGeometry(radius*0.25, radius*0.25, 0.14, 16), materials.red);
-            
+            group.userData.isBullseyeGroup = true;
+            const r1 = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.1, 24), materials.red);
+            const r2 = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.6, radius * 0.6, 0.12, 24), materials.white);
+            const r3 = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.25, radius * 0.25, 0.14, 24), materials.red);
             r1.rotation.x = Math.PI / 2;
             r2.rotation.x = Math.PI / 2;
             r3.rotation.x = Math.PI / 2;
-            
             group.add(r1, r2, r3);
-            
             [r1, r2, r3].forEach(mesh => {
-                mesh.userData = { isTarget: true, type: 'bullseye', points: 150 };
+                mesh.userData = { isTarget: true, type: 'bullseye', points: points || 150 };
             });
             return group;
         }
 
+        function addEye(parent, x, y, z, sharedData, r) {
+            const eye = new THREE.Mesh(new THREE.SphereGeometry(r || 0.09, 8, 8), materials.black);
+            eye.position.set(x, y, z);
+            eye.userData = sharedData; // hitting an eye still counts as a body hit
+            parent.add(eye);
+        }
+
         function spawnTarget() {
-            const types = ['duck', 'boat', 'tube', 'pingpong', 'fish', 'beachball', 'speedboat', 'airplane', 'golden_duck'];
-            let type;
             const r = Math.random();
-            if (r < 0.01) type = 'golden_duck'; // Reduced from 0.05 (5%) to 0.01 (1%) chance for Jackpot!
+            let type;
+            if (r < 0.01) type = 'golden_duck';
             else if (r < 0.20) type = 'duck';
             else if (r < 0.32) type = 'boat';
             else if (r < 0.42) type = 'tube';
@@ -644,214 +1018,238 @@
             else type = 'fish';
 
             const targetObj = new THREE.Group();
-            targetObj.userData = { 
-                type: type, 
-                active: true, 
-                speed: (Math.random() * 2 + 2) * (Math.random() > 0.5 ? 1 : -1), 
-                baseY: 0,
-                age: 0
+            targetObj.userData = {
+                type: type, active: true,
+                speed: (Math.random() * 2 + 2) * (Math.random() > 0.5 ? 1 : -1),
+                baseY: 0, age: 0
             };
 
-            const zPos = -5 - (Math.random() * 12); 
-            const startX = targetObj.userData.speed > 0 ? -25 : 25;
+            const zPos = -5 - (Math.random() * 12);
+            const startX = targetObj.userData.speed > 0 ? -26 : 26;
             targetObj.position.set(startX, 0, zPos);
+            const dir = targetObj.userData.speed > 0 ? 1 : -1; // facing direction along x
 
-            switch(type) {
+            switch (type) {
                 case 'duck':
-                    const duckBody = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 1.2), materials.yellow);
-                    duckBody.position.y = 0.4;
-                    duckBody.castShadow = true;
-                    duckBody.userData = { isTarget: true, type: 'body', points: 10, parentGrp: targetObj };
-                    
-                    const duckHead = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), materials.yellow);
-                    duckHead.position.set(0, 1.1, targetObj.userData.speed > 0 ? 0.3 : -0.3);
-                    duckHead.castShadow = true;
-                    duckHead.userData = duckBody.userData;
+                case 'golden_duck': {
+                    const isGold = type === 'golden_duck';
+                    const bodyMat = isGold ? materials.gold : materials.yellow;
+                    const pts = isGold ? 500 : 10;
+                    if (isGold) targetObj.userData.speed *= 3.0;
+                    const sharedData = { isTarget: true, type: isGold ? 'gold_body' : 'body', points: pts, parentGrp: targetObj };
 
-                    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.4, 4), materials.orange);
-                    beak.rotation.x = Math.PI / 2;
-                    beak.position.set(0, 1.1, targetObj.userData.speed > 0 ? 0.7 : -0.7);
-                    beak.userData = duckBody.userData;
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(0.62, 16, 16), bodyMat);
+                    body.scale.set(1.25, 0.95, 1.0);
+                    body.position.y = 0.55;
+                    body.castShadow = true;
+                    body.userData = sharedData;
 
-                    const duckBullseye = createBullseyeTarget(0.4);
-                    duckBullseye.position.set(0, 0.5, 0.65); 
-                    duckBullseye.children.forEach(c => c.userData.parentGrp = targetObj);
+                    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.55, 10), bodyMat);
+                    tail.position.set(-0.7 * dir, 0.7, 0);
+                    tail.rotation.z = dir > 0 ? -Math.PI / 3 : Math.PI / 3;
+                    tail.userData = sharedData;
 
-                    targetObj.add(duckBody, duckHead, beak, duckBullseye);
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 16, 16), bodyMat);
+                    head.position.set(0.5 * dir, 1.15, 0);
+                    head.castShadow = true;
+                    head.userData = sharedData;
+
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.4, 8), materials.orange);
+                    beak.rotation.z = -Math.PI / 2 * dir;
+                    beak.position.set(0.85 * dir, 1.12, 0);
+                    beak.userData = sharedData;
+
+                    targetObj.add(body, tail, head, beak);
+                    addEye(targetObj, 0.62 * dir, 1.25, 0.22, sharedData, 0.07);
+                    addEye(targetObj, 0.62 * dir, 1.25, -0.22, sharedData, 0.07);
+
+                    if (isGold) {
+                        const gLight = new THREE.PointLight(0xffcc00, 1.6, 9);
+                        gLight.position.set(0, 1.4, 0);
+                        targetObj.add(gLight);
+                    } else {
+                        const bull = createBullseyeTarget(0.36, 150);
+                        bull.position.set(0, 0.6, 0.55);
+                        bull.children.forEach(c => c.userData.parentGrp = targetObj);
+                        targetObj.add(bull);
+                    }
                     break;
+                }
 
-                case 'boat':
-                    const hull = new THREE.Mesh(new THREE.BoxGeometry(2, 0.6, 1), materials.red);
+                case 'boat': {
+                    const sharedData = { isTarget: true, type: 'body', points: 10, parentGrp: targetObj };
+                    const hull = new THREE.Mesh(new THREE.BoxGeometry(2, 0.55, 1), materials.red);
                     hull.position.y = 0.3;
-                    hull.userData = { isTarget: true, type: 'body', points: 10, parentGrp: targetObj };
+                    hull.userData = sharedData;
+                    // pointed bow
+                    const bow = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 4), materials.red);
+                    bow.rotation.z = -Math.PI / 2 * dir;
+                    bow.rotation.y = Math.PI / 4;
+                    bow.position.set(1.1 * dir, 0.3, 0);
+                    bow.userData = sharedData;
 
-                    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1, 0.8, 0.8), materials.white);
-                    cabin.position.set(targetObj.userData.speed > 0 ? -0.3 : 0.3, 1, 0);
-                    cabin.userData = hull.userData;
+                    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1, 0.7, 0.85), materials.white);
+                    cabin.position.set(-0.3 * dir, 0.95, 0);
+                    cabin.userData = sharedData;
+                    const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.6, 12), materials.yellow);
+                    stack.position.set(0.35 * dir, 1.15, 0);
+                    stack.userData = sharedData;
 
-                    const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.6), materials.brown);
-                    stack.position.set(targetObj.userData.speed > 0 ? 0.3 : -0.3, 1.2, 0);
-                    stack.userData = hull.userData;
+                    // little flag on a mast
+                    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.8, 6), materials.brown);
+                    mast.position.set(-0.3 * dir, 1.7, 0);
+                    mast.userData = sharedData;
+                    const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.25), materials.green);
+                    flag.position.set(-0.3 * dir + 0.2 * dir, 1.95, 0);
+                    flag.userData = sharedData;
 
-                    const boatBullseye = createBullseyeTarget(0.4);
-                    boatBullseye.position.set(0, 0.5, 0.55);
-                    boatBullseye.children.forEach(c => c.userData.parentGrp = targetObj);
+                    const bull = createBullseyeTarget(0.36, 150);
+                    bull.position.set(0, 0.55, 0.52);
+                    bull.children.forEach(c => c.userData.parentGrp = targetObj);
 
-                    targetObj.add(hull, cabin, stack, boatBullseye);
+                    targetObj.add(hull, bow, cabin, stack, mast, flag, bull);
                     break;
+                }
 
-                case 'speedboat':
-                    targetObj.userData.speed *= 2.5; // Runs super fast
-                    const sHullGeo = new THREE.ConeGeometry(0.6, 2, 8);
-                    const sHull = new THREE.Mesh(sHullGeo, materials.white);
+                case 'speedboat': {
+                    targetObj.userData.speed *= 2.5;
+                    const d = targetObj.userData.speed > 0 ? 1 : -1;
+                    const sharedData = { isTarget: true, type: 'body', points: 20, parentGrp: targetObj };
+                    const sHull = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.2, 10), materials.white);
                     sHull.position.y = 0.3;
-                    // Rotate so the tip points in direction of travel
-                    sHull.rotation.z = targetObj.userData.speed > 0 ? -Math.PI/2 : Math.PI/2;
-                    sHull.userData = { isTarget: true, type: 'body', points: 20, parentGrp: targetObj };
+                    sHull.rotation.z = d > 0 ? -Math.PI / 2 : Math.PI / 2;
+                    sHull.userData = sharedData;
+                    const cockpit = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 12, 0, Math.PI * 2, 0, Math.PI / 2), materials.blue);
+                    cockpit.position.set(0, 0.55, 0);
+                    cockpit.userData = sharedData;
+                    const spoiler = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.45, 0.8), materials.red);
+                    spoiler.position.set(-0.85 * d, 0.5, 0);
+                    spoiler.userData = sharedData;
 
-                    const spoiler = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.5, 0.8), materials.red);
-                    spoiler.position.set(targetObj.userData.speed > 0 ? -0.8 : 0.8, 0.5, 0);
-                    spoiler.userData = sHull.userData;
+                    const bull = createBullseyeTarget(0.32, 200);
+                    bull.position.set(0, 0.85, 0);
+                    bull.children.forEach(c => { c.userData.parentGrp = targetObj; c.userData.points = 200; });
 
-                    const speedBullseye = createBullseyeTarget(0.35);
-                    speedBullseye.position.set(0, 0.8, 0);
-                    // Override points for hard target
-                    speedBullseye.children.forEach(c => {
-                        c.userData.parentGrp = targetObj;
-                        c.userData.points = 200;
-                    });
-
-                    targetObj.add(sHull, spoiler, speedBullseye);
+                    targetObj.add(sHull, cockpit, spoiler, bull);
                     break;
+                }
 
-                case 'airplane':
-                    targetObj.userData.speed *= 3.5; // Very fast
-                    targetObj.position.y = 5 + Math.random() * 3; // High up in the air
-                    targetObj.position.z = -8 - Math.random() * 5; 
+                case 'airplane': {
+                    targetObj.userData.speed *= 3.5;
+                    const d = targetObj.userData.speed > 0 ? 1 : -1;
+                    targetObj.position.y = 5 + Math.random() * 3;
+                    targetObj.position.z = -8 - Math.random() * 5;
+                    const sharedData = { isTarget: true, type: 'body', points: 30, parentGrp: targetObj };
 
-                    const fuselageGeo = new THREE.CylinderGeometry(0.4, 0.2, 3, 16);
+                    const fuselageGeo = new THREE.CylinderGeometry(0.4, 0.18, 3, 16);
                     fuselageGeo.rotateZ(Math.PI / 2);
                     const fuselage = new THREE.Mesh(fuselageGeo, materials.red);
-                    fuselage.userData = { isTarget: true, type: 'body', points: 30, parentGrp: targetObj };
-                    
-                    const wingsGeo = new THREE.BoxGeometry(1.5, 0.1, 4);
-                    const wings = new THREE.Mesh(wingsGeo, materials.white);
+                    fuselage.userData = sharedData;
+                    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 12), materials.red);
+                    nose.position.set(1.5 * d, 0, 0);
+                    nose.userData = sharedData;
+                    const cockpit = new THREE.Mesh(new THREE.SphereGeometry(0.25, 10, 10), materials.blue);
+                    cockpit.position.set(0.4 * d, 0.28, 0);
+                    cockpit.userData = sharedData;
+
+                    const wings = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.1, 4), materials.white);
                     wings.position.set(0.2, 0, 0);
-                    wings.userData = fuselage.userData;
+                    wings.userData = sharedData;
+                    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.1), materials.white);
+                    tail.position.set(-1.2 * d, 0.4, 0);
+                    tail.userData = sharedData;
 
-                    const tailGeo = new THREE.BoxGeometry(0.8, 0.8, 0.1);
-                    const tail = new THREE.Mesh(tailGeo, materials.white);
-                    tail.position.set(targetObj.userData.speed > 0 ? -1.2 : 1.2, 0.4, 0);
-                    tail.userData = fuselage.userData;
+                    const bull = createBullseyeTarget(0.5, 300);
+                    bull.position.set(0, -0.6, 0);
+                    bull.children.forEach(c => { c.userData.parentGrp = targetObj; c.userData.points = 300; });
 
-                    const airplaneBullseye = createBullseyeTarget(0.5);
-                    // Mount bullseye on the bottom so it can be shot from below
-                    airplaneBullseye.position.set(0, -0.6, 0); 
-                    airplaneBullseye.children.forEach(c => {
-                        c.userData.parentGrp = targetObj;
-                        c.userData.points = 300;
-                    });
-                    
-                    targetObj.add(fuselage, wings, tail, airplaneBullseye);
-                    
-                    // Keep track of propeller so we can spin it later
-                    const propGeo = new THREE.BoxGeometry(0.1, 1.6, 0.2);
-                    const prop = new THREE.Mesh(propGeo, materials.brown);
-                    prop.position.set(targetObj.userData.speed > 0 ? 1.5 : -1.5, 0, 0);
+                    targetObj.add(fuselage, nose, cockpit, wings, tail, bull);
+
+                    const prop = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.6, 0.2), materials.brown);
+                    prop.position.set(1.75 * d, 0, 0);
+                    prop.userData = sharedData;
                     targetObj.userData.propeller = prop;
                     targetObj.add(prop);
                     break;
+                }
 
-                case 'golden_duck':
-                    targetObj.userData.speed *= 3.0; // Very Fast
-                    const gDuckBody = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 1.2), materials.gold);
-                    gDuckBody.position.y = 0.4;
-                    gDuckBody.castShadow = true;
-                    gDuckBody.userData = { isTarget: true, type: 'body', points: 500, parentGrp: targetObj };
-                    
-                    const gDuckHead = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), materials.gold);
-                    gDuckHead.position.set(0, 1.1, targetObj.userData.speed > 0 ? 0.3 : -0.3);
-                    gDuckHead.castShadow = true;
-                    gDuckHead.userData = gDuckBody.userData;
-
-                    const gBeak = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.4, 4), materials.orange);
-                    gBeak.rotation.x = Math.PI / 2;
-                    gBeak.position.set(0, 1.1, targetObj.userData.speed > 0 ? 0.7 : -0.7);
-                    gBeak.userData = gDuckBody.userData;
-
-                    // Add a shiny glowing light to the golden duck
-                    const gLight = new THREE.PointLight(0xffcc00, 1.5, 8);
-                    gLight.position.set(0, 1.5, 0);
-
-                    targetObj.add(gDuckBody, gDuckHead, gBeak, gLight);
-                    break;
-
-                case 'tube':
-                    const tubeGeo = new THREE.TorusGeometry(0.6, 0.25, 8, 16);
+                case 'tube': {
+                    const tubeGeo = new THREE.TorusGeometry(0.6, 0.26, 12, 20);
                     tubeGeo.rotateX(Math.PI / 2);
                     const tMat = Math.random() > 0.5 ? materials.pink : materials.green;
                     const tube = new THREE.Mesh(tubeGeo, tMat);
-                    tube.position.y = 0.1;
+                    tube.position.y = 0.12;
+                    tube.castShadow = true;
                     tube.userData = { isTarget: true, type: 'tube', points: 30, parentGrp: targetObj };
                     targetObj.add(tube);
                     break;
+                }
 
-                case 'pingpong':
-                    const tee = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2), materials.brown);
+                case 'pingpong': {
+                    const tee = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 2, 8), materials.brown);
                     tee.position.y = 1;
-                    tee.userData = { isTarget: false }; 
-                    
+                    tee.userData = { isTarget: false };
+                    // water jet base for the floating ball
+                    const jet = new THREE.Mesh(
+                        new THREE.ConeGeometry(0.18, 0.6, 8),
+                        new THREE.MeshPhysicalMaterial({ color: 0x66ddff, transparent: true, opacity: 0.5, transmission: 0.8 })
+                    );
+                    jet.position.y = 1.75;
+                    jet.userData = { isTarget: false };
                     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16), materials.white);
-                    ball.position.y = 2.1;
+                    ball.position.y = 2.15;
+                    ball.castShadow = true;
                     ball.userData = { isTarget: true, type: 'ball', points: 50, parentGrp: targetObj };
-                    
-                    targetObj.userData.ballMesh = ball; 
-                    targetObj.add(tee, ball);
+                    targetObj.userData.ballMesh = ball;
+                    targetObj.add(tee, jet, ball);
                     break;
+                }
 
-                case 'beachball':
-                    const bbMesh = new THREE.Mesh(new THREE.SphereGeometry(0.8, 16, 16), materials.beachball);
+                case 'beachball': {
+                    const bbMesh = new THREE.Mesh(new THREE.SphereGeometry(0.8, 20, 20), materials.beachball);
                     bbMesh.position.y = 0.8;
+                    bbMesh.castShadow = true;
                     bbMesh.userData = { isTarget: true, type: 'beachball', points: 80, parentGrp: targetObj };
                     targetObj.add(bbMesh);
                     break;
+                }
 
-                case 'fish':
-                    const fishGeo = new THREE.ConeGeometry(0.3, 1, 8);
-                    fishGeo.rotateX(Math.PI / 2); 
-                    const fish = new THREE.Mesh(fishGeo, materials.blue);
-                    fish.userData = { isTarget: true, type: 'fish', points: 100, parentGrp: targetObj };
-                    
-                    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.4, 4), materials.orange);
-                    fin.position.set(0, 0.2, -0.2);
-                    fish.add(fin);
+                case 'fish': {
+                    const sharedData = { isTarget: true, type: 'fish', points: 100, parentGrp: targetObj };
+                    const bodyGeo = new THREE.SphereGeometry(0.4, 14, 14);
+                    const fish = new THREE.Mesh(bodyGeo, materials.fishBlue);
+                    fish.scale.set(0.8, 1, 1.6);
+                    fish.userData = sharedData;
+                    // tail fin
+                    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.5, 4), materials.fishBlue);
+                    tail.rotation.x = -Math.PI / 2;
+                    tail.position.set(0, 0, -0.75);
+                    tail.scale.set(1, 0.3, 1);
+                    tail.userData = sharedData;
+                    // dorsal fin
+                    const dorsal = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.35, 4), materials.orange);
+                    dorsal.position.set(0, 0.35, 0);
+                    dorsal.userData = sharedData;
+                    fish.add(tail, dorsal);
+                    addEye(fish, 0.18, 0.12, 0.45, sharedData, 0.07);
+                    addEye(fish, -0.18, 0.12, 0.45, sharedData, 0.07);
 
-                    targetObj.userData.baseY = -2; 
+                    targetObj.userData.baseY = -2;
                     targetObj.position.y = -2;
                     targetObj.add(fish);
                     break;
-            }
-
-            // Exclude airplane since its model orientation already factors in speed direction
-            if (targetObj.userData.speed < 0 && type !== 'speedboat' && type !== 'airplane') {
-                targetObj.rotation.y = Math.PI; 
+                }
             }
 
             scene.add(targetObj);
             targets.push(targetObj);
         }
 
-        // --- Game Logic ---
-
-        function startGame() {
-            isPlaying = true;
-            score = 0;
-            timeLeft = 60;
-            updateHUD();
-            
-            targets.forEach(t => scene.remove(t));
-            targets.length = 0;
-
+        // ============================================================
+        //  Game Logic
+        // ============================================================
+        function startTimer() {
+            clearInterval(gameTimerInterval);
             gameTimerInterval = setInterval(() => {
                 timeLeft--;
                 updateHUD();
@@ -859,27 +1257,64 @@
             }, 1000);
         }
 
+        function startGame() {
+            isPlaying = true;
+            isPaused = false;
+            score = 0;
+            timeLeft = 60;
+            comboCount = 0;
+            comboTimer = 0;
+            comboDisplay.style.opacity = 0;
+            updateHUD();
+
+            instructionsEl.innerHTML = originalInstructions;
+            titleText.innerText = 'Carnival Splash';
+
+            targets.forEach(t => scene.remove(t));
+            targets.length = 0;
+
+            startTimer();
+        }
+
         function pauseGame() {
             isPlaying = false;
+            isPaused = true;
             clearInterval(gameTimerInterval);
+            isShooting = false;
+            crosshair.classList.remove('shooting');
+            stopSpraySound();
             overlay.style.display = 'flex';
-            titleText.innerText = 'Game Paused';
+            crosshair.style.display = 'none';
+            document.body.style.cursor = 'auto';
+            titleText.innerText = 'Paused';
+            instructionsEl.innerHTML = originalInstructions;
             startBtn.innerText = 'Resume';
+        }
+
+        function resumeGame() {
+            isPlaying = true;
+            isPaused = false;
+            overlay.style.display = 'none';
+            startTimer();
         }
 
         function endGame() {
             isPlaying = false;
-            controls.unlock();
+            isPaused = false;
             clearInterval(gameTimerInterval);
+            isShooting = false;
+            crosshair.classList.remove('shooting');
+            stopSpraySound();
             overlay.style.display = 'flex';
+            crosshair.style.display = 'none';
+            document.body.style.cursor = 'auto';
             titleText.innerText = 'Time Up!';
-            document.getElementById('instructions').innerHTML = `
-                <h2 style="font-size: 48px; color: #00ffcc; margin:0;">Final Score: ${score}</h2>
-                <p>Great shooting! Ready for another round?</p>
-            `;
+            instructionsEl.innerHTML =
+                '<h2 style="font-size: 48px; color: #00ffcc; margin:0;">Final Score: ' + score + '</h2>' +
+                '<p>Great shooting! Ready for another round?</p>';
             startBtn.innerText = 'Play Again';
+            playGameOver();
 
-            // Fire Confetti!
             confettis.forEach(c => {
                 c.active = true;
                 c.mesh.visible = true;
@@ -891,13 +1326,25 @@
 
         function updateHUD() {
             scoreDisplay.innerText = score;
-            timeDisplay.innerText = timeLeft;
+            timeDisplay.innerText = Math.max(0, timeLeft);
         }
 
-        function spawnFloatingText(points, isBullseye, position3D) {
+        function registerCombo() {
+            comboCount++;
+            comboTimer = 2.0;
+            if (comboCount >= 3) {
+                comboDisplay.innerText = comboCount + 'x COMBO!';
+                comboDisplay.style.opacity = 1;
+            }
+        }
+
+        function spawnFloatingText(points, kind, position3D) {
             const div = document.createElement('div');
             div.className = 'floating-score';
-            if (isBullseye) {
+            if (kind === 'jackpot') {
+                div.classList.add('jackpot-text');
+                div.innerText = 'JACKPOT!\n+' + points;
+            } else if (kind === 'bullseye') {
                 div.classList.add('bullseye-text');
                 div.innerText = 'BULLSEYE!\n+' + points;
             } else {
@@ -906,151 +1353,176 @@
 
             const vector = position3D.clone();
             vector.project(camera);
-            
-            const x = (vector.x * .5 + .5) * window.innerWidth;
-            const y = -(vector.y * .5 - .5) * window.innerHeight;
-            
-            div.style.left = `${x}px`;
-            div.style.top = `${y}px`;
-            
+            if (vector.z > 1) return; // behind camera
+            const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+            const y = -(vector.y * 0.5 - 0.5) * window.innerHeight;
+            div.style.left = x + 'px';
+            div.style.top = y + 'px';
             document.getElementById('ui-layer').appendChild(div);
-            
             setTimeout(() => { div.remove(); }, 1000);
         }
 
         function handleHit(intersect) {
             const mesh = intersect.object;
             const data = mesh.userData;
-            
-            if (!data.isTarget) return;
 
+            // Pinwheel: spin it, award small points with a cooldown
+            if (data && data.pinwheelRef) {
+                const pw = data.pinwheelRef;
+                pw.userData.spinVel = Math.min(pw.userData.spinVel + 1.6, 32);
+                if (pw.userData.cooldown <= 0) {
+                    score += 5;
+                    updateHUD();
+                    spawnFloatingText(5, 'normal', intersect.point);
+                    playHit(5, false);
+                    pw.userData.cooldown = 0.4;
+                }
+                return;
+            }
+
+            if (!data || !data.isTarget) return;
             const parent = data.parentGrp;
-            if (parent && !parent.userData.active) return; 
+            if (parent && !parent.userData.active) return;
 
             score += data.points;
             updateHUD();
-            spawnFloatingText(data.points, data.type === 'bullseye', intersect.point);
+            registerCombo();
+
+            let kind = 'normal';
+            if (data.points >= 500) kind = 'jackpot';
+            else if (data.type === 'bullseye') kind = 'bullseye';
+            spawnFloatingText(data.points, kind, intersect.point);
+            playHit(data.points, data.type === 'bullseye');
 
             if (parent) {
-                parent.userData.active = false; 
-
+                parent.userData.active = false;
                 if (data.type === 'ball') {
-                    parent.userData.ballVelocity = new THREE.Vector3((Math.random()-0.5)*0.2, 0.3, -0.2);
+                    parent.userData.ballVelocity = new THREE.Vector3((Math.random() - 0.5) * 0.2, 0.3, -0.2);
                 } else if (parent.userData.type === 'fish') {
                     parent.userData.hitDrop = true;
                 } else if (parent.userData.type === 'beachball') {
                     parent.userData.hitBounce = true;
-                    // Send it flying back and up
-                    parent.userData.velocity = new THREE.Vector3((Math.random()-0.5)*0.5, 0.6, -0.3);
+                    parent.userData.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.5, 0.6, -0.3);
                 } else {
                     parent.userData.sinking = true;
-                    if (parent.userData.type === 'speedboat') {
-                        parent.rotation.x += Math.PI; // Flip speedboats
-                    }
+                    if (parent.userData.type === 'speedboat') parent.rotation.x += Math.PI;
                 }
             } else {
                 scene.remove(mesh);
             }
         }
 
-        // --- Render Loop ---
-
+        // ============================================================
+        //  Updates
+        // ============================================================
         function updateParticles(dt) {
-            // Emitting Water Gun Stream
+            // Emit stream + instant raycast hit
             if (isShooting && isPlaying) {
-                // Emit 3 particles per frame to create a highly intense, thick stream
-                for (let k = 0; k < 3; k++) {
+                // Aim ray points through the crosshair so the visible jet matches the hit
+                raycaster.setFromCamera(mouse, camera);
+                const dir = raycaster.ray.direction.clone();
+                const nozzlePos = new THREE.Vector3(0.31, -0.41, -0.956).applyMatrix4(camera.matrixWorld);
+
+                for (let k = 0; k < 5; k++) {
                     const p = waterParticles.find(p => !p.active);
-                    if (p) {
-                        p.active = true;
-                        p.life = 1.5; // Longer life so the particles travel the full distance
-                        p.mesh.visible = true;
-                        
-                        // Exact local coordinates of the newly scaled/shifted gun nozzle
-                        p.mesh.position.set(0.31, -0.41, -0.956);
-                        p.mesh.position.applyMatrix4(camera.matrixWorld);
-                        
-                        const dir = new THREE.Vector3(0, 0, -1);
-                        dir.applyQuaternion(camera.quaternion);
-                        // Very tight spread for a concentrated, laser-like jet
-                        dir.x += (Math.random() - 0.5) * 0.015;
-                        dir.y += (Math.random() - 0.5) * 0.015;
-                        dir.normalize();
-                        
-                        // Double the speed (80) so it reaches the target quickly
-                        p.velocity.copy(dir).multiplyScalar(80); 
-                    }
+                    if (!p) break;
+                    const core = k < 3; // first three: tight fast core; rest: muzzle froth
+                    p.active = true;
+                    p.mesh.visible = true;
+                    p.mesh.position.copy(nozzlePos);
+                    p.mesh.scale.setScalar(core ? (0.9 + Math.random() * 0.9) : (0.5 + Math.random() * 0.6));
+                    const spread = core ? 0.03 : 0.12;
+                    const d = dir.clone();
+                    d.x += (Math.random() - 0.5) * spread;
+                    d.y += (Math.random() - 0.5) * spread;
+                    d.z += (Math.random() - 0.5) * spread;
+                    d.normalize();
+                    const sp = core ? (74 + Math.random() * 16) : (38 + Math.random() * 22);
+                    p.velocity.copy(d).multiplyScalar(sp);
+                    p.life = core ? (1.0 + Math.random() * 0.3) : (0.35 + Math.random() * 0.25);
                 }
 
-                // Instant Raycast hit detection
-                raycaster.setFromCamera(mouse, camera);
-                const intersects = raycaster.intersectObjects(targets, true);
+                // Drive the glowing jet core from the muzzle along the aim direction
+                if (jetCore) {
+                    const L = jetCore.userData.len;
+                    jetCore.visible = true;
+                    jetCore.position.copy(nozzlePos).addScaledVector(dir, L * 0.5);
+                    jetCore.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+                    const f = 0.8 + Math.random() * 0.4; // subtle pressure flicker
+                    jetCore.scale.set(f, 1, f);
+                }
+
+                const shootables = targets.concat(pinwheels);
+                const intersects = raycaster.intersectObjects(shootables, true);
                 if (intersects.length > 0) {
-                    // Create a splash exactly where the invisible raycast hits
-                    createSplash(intersects[0].point, intersects[0].face ? intersects[0].face.normal : new THREE.Vector3(0,1,0), 2);
+                    createSplash(intersects[0].point,
+                        intersects[0].face ? intersects[0].face.normal : new THREE.Vector3(0, 1, 0), 5);
                     handleHit(intersects[0]);
                 }
+            } else if (jetCore) {
+                jetCore.visible = false;
             }
 
-            // Updating Water Gun Drops
+            // Stream droplets
             waterParticles.forEach(p => {
                 if (p.active) {
                     p.mesh.position.addScaledVector(p.velocity, dt);
-                    p.velocity.y -= 10 * dt; // Halved the gravity so the stream shoots straighter
-                    p.life -= dt; // Deplete life slower
-                    
-                    // Splash when hitting water level (-0.2 is the pool plane Y)
-                    if (p.mesh.position.y <= -0.2 || p.life <= 0) {
+                    p.velocity.y -= 10 * dt;
+                    p.life -= dt;
+                    if (p.mesh.position.y <= WATER_Y || p.life <= 0) {
                         p.active = false;
                         p.mesh.visible = false;
-                        if (p.mesh.position.y <= -0.2) {
+                        if (p.mesh.position.y <= WATER_Y) {
                             createSplash(p.mesh.position, new THREE.Vector3(0, 1, 0), 2);
+                            if (Math.random() < 0.35) spawnRipple(p.mesh.position.x, p.mesh.position.z);
                         }
                     }
                 }
             });
 
-            // Updating Splash Particles
+            // Splash droplets
             splashes.forEach(s => {
                 if (s.active) {
                     s.mesh.position.addScaledVector(s.velocity, dt);
-                    s.velocity.y -= 15 * dt; // gravity
+                    s.velocity.y -= 15 * dt;
                     s.life -= dt;
-                    s.mesh.scale.setScalar(Math.max(0.01, s.life * 3)); // Shrink as they die
-
-                    if (s.life <= 0 || s.mesh.position.y <= -0.2) {
+                    s.mesh.scale.setScalar(Math.max(0.01, s.life * 3));
+                    if (s.life <= 0 || s.mesh.position.y <= WATER_Y) {
                         s.active = false;
                         s.mesh.visible = false;
                     }
                 }
             });
 
-            // Updating Confetti
+            // Ripple rings
+            ripples.forEach(r => {
+                if (r.active) {
+                    r.life += dt;
+                    const t = r.life / r.maxLife;
+                    r.mesh.scale.setScalar(1 + t * 9);
+                    r.mesh.material.opacity = 0.7 * (1 - t);
+                    if (t >= 1) { r.active = false; r.mesh.visible = false; }
+                }
+            });
+
+            // Confetti
             confettis.forEach(c => {
                 if (c.active) {
                     c.mesh.position.addScaledVector(c.velocity, dt);
                     c.mesh.rotation.x += c.angularVel.x;
                     c.mesh.rotation.y += c.angularVel.y;
                     c.mesh.rotation.z += c.angularVel.z;
-                    
-                    // Air resistance and slight sway
                     c.velocity.x *= 0.98;
                     c.velocity.z *= 0.98;
                     c.velocity.x += Math.sin(Date.now() * 0.002 + c.mesh.id) * 0.05;
-                    
-                    if (c.mesh.position.y < -2) {
-                        c.active = false;
-                        c.mesh.visible = false;
-                    }
+                    if (c.mesh.position.y < -2) { c.active = false; c.mesh.visible = false; }
                 }
             });
         }
 
         function updateTargets(dt) {
-            if (isPlaying && Math.random() < 0.04) { 
-                if (targets.length < 18) { 
-                    spawnTarget();
-                }
+            if (isPlaying && Math.random() < 0.04) {
+                if (targets.length < 18) spawnTarget();
             }
 
             for (let i = targets.length - 1; i >= 0; i--) {
@@ -1058,63 +1530,50 @@
                 const type = t.userData.type;
                 t.userData.age += dt;
 
-                // Make all Bullseyes dynamically lock-on and look at the camera position
                 t.children.forEach(child => {
-                    if (child.userData.isBullseyeGroup) {
-                        child.lookAt(camera.position);
-                    }
+                    if (child.userData.isBullseyeGroup) child.lookAt(camera.position);
                 });
 
                 if (t.userData.active) {
-                    // Normal Movement
                     t.position.x += t.userData.speed * dt;
-                    
+
                     if (type === 'beachball') {
-                        // High amplitude bouncing
                         t.position.y = Math.abs(Math.sin(t.userData.age * 4)) * 2;
                         t.rotation.x += dt * 0.5;
                         t.rotation.y += dt;
                     } else if (type === 'fish') {
-                        // Parabolic jump arc
                         t.position.y = t.userData.baseY + Math.sin(t.userData.age * 2) * 5;
-                        t.rotation.z = Math.cos(t.userData.age * 2) * 0.5 * (t.userData.speed > 0 ? -1 : 1);
-                        
-                        if (t.userData.age > Math.PI / 2) { 
-                            scene.remove(t);
-                            targets.splice(i, 1);
-                            continue;
+                        t.rotation.x = Math.cos(t.userData.age * 2) * 0.6;
+                        if (t.userData.age > Math.PI / 2) {
+                            scene.remove(t); targets.splice(i, 1); continue;
                         }
                     } else if (type === 'tube') {
-                        t.rotation.y += 1 * dt; 
+                        t.rotation.y += 1 * dt;
                         t.position.y = Math.sin(t.userData.age * 3) * 0.1;
                     } else if (type === 'airplane') {
-                        t.position.y += Math.sin(t.userData.age * 5) * 0.02; // Slight altitude bob
-                        if (t.userData.propeller) {
-                            t.userData.propeller.rotation.x += 20 * dt; // Spin prop
-                        }
+                        t.position.y += Math.sin(t.userData.age * 5) * 0.02;
+                        if (t.userData.propeller) t.userData.propeller.rotation.x += 20 * dt;
                     } else if (type === 'golden_duck') {
-                        // Golden duck jumps erratically
                         t.position.y = Math.abs(Math.sin(t.userData.age * 8)) * 1.5;
                         t.rotation.y += Math.sin(t.userData.age * 10) * 0.05;
                     } else {
-                        // Standard bobbing
                         t.position.y = Math.sin(t.userData.age * 3) * 0.1;
                     }
                 } else {
-                    // Death Animations
+                    // Death animations
                     if (type === 'pingpong' && t.userData.ballMesh) {
                         const ball = t.userData.ballMesh;
                         ball.position.add(t.userData.ballVelocity);
-                        t.userData.ballVelocity.y -= 0.01; 
-                        if (ball.position.y < -1) t.userData.sinking = true; 
+                        t.userData.ballVelocity.y -= 0.01;
+                        if (ball.position.y < -1) t.userData.sinking = true;
                     } else if (type === 'airplane') {
-                        t.position.y -= 8 * dt; // Crash down fast
+                        t.position.y -= 8 * dt;
                         t.rotation.z += 10 * dt;
-                        t.position.x += t.userData.speed * dt * 0.5; // Continue forward momentum
+                        t.position.x += t.userData.speed * dt * 0.5;
                         if (t.position.y < -2) t.userData.sinking = true;
                     } else if (type === 'beachball' && t.userData.hitBounce) {
                         t.position.add(t.userData.velocity);
-                        t.userData.velocity.y -= 0.02; // Gravity
+                        t.userData.velocity.y -= 0.02;
                         t.rotation.x += 0.2;
                         t.rotation.y += 0.2;
                         if (t.position.y < -3) t.userData.sinking = true;
@@ -1126,50 +1585,71 @@
                         t.position.y -= 2 * dt;
                         t.rotation.x -= 2 * dt;
                         if (t.position.y < -2) {
-                            scene.remove(t);
-                            targets.splice(i, 1);
-                            continue;
+                            scene.remove(t); targets.splice(i, 1); continue;
                         }
                     }
                 }
 
-                if (Math.abs(t.position.x) > 30) {
-                    scene.remove(t);
-                    targets.splice(i, 1);
+                if (Math.abs(t.position.x) > 32) {
+                    scene.remove(t); targets.splice(i, 1);
                 }
             }
         }
 
+        function updatePinwheels(dt) {
+            pinwheels.forEach(p => {
+                // decay spin back toward a gentle idle turn
+                p.userData.spinVel = Math.max(0.6, p.userData.spinVel - dt * 6);
+                p.userData.head.rotation.z += p.userData.spinVel * dt;
+                if (p.userData.cooldown > 0) p.userData.cooldown -= dt;
+            });
+        }
+
         function animate() {
             requestAnimationFrame(animate);
-            const dt = Math.min(clock.getDelta(), 0.1); 
+            const dt = Math.min(clock.getDelta(), 0.1);
+
+            // Smoothly steer the camera toward the cursor aim
+            const k = Math.min(1, dt * 8);
+            lookYaw += (targetYaw - lookYaw) * k;
+            lookPitch += (targetPitch - lookPitch) * k;
+            camera.rotation.set(lookPitch, lookYaw, 0);
+            camera.updateMatrixWorld(true);
 
             updateParticles(dt);
             updateTargets(dt);
+            updatePinwheels(dt);
 
-            // Animate Twinkling String Lights
+            // Combo decay
+            if (comboTimer > 0) {
+                comboTimer -= dt;
+                if (comboTimer <= 0) {
+                    comboCount = 0;
+                    comboDisplay.style.opacity = 0;
+                }
+            }
+
+            // Twinkling lights + bobbing balloons
             lightsList.forEach(l => {
-                l.userData.phase += dt * 3;
-                l.intensity = l.userData.baseIntensity + Math.sin(l.userData.phase) * 0.3;
+                if (l.isBalloon) {
+                    l.mesh.position.y = l.mesh.userData.baseY + Math.sin(Date.now() * 0.001 + l.mesh.userData.bobPhase) * 0.3;
+                } else {
+                    l.userData.phase += dt * 3;
+                    l.intensity = l.userData.baseIntensity + Math.sin(l.userData.phase) * 0.3;
+                }
             });
 
-            // Gently drift dust particles
             if (dustParticles) {
                 dustParticles.position.y += dt * 0.5;
                 dustParticles.rotation.y += dt * 0.02;
-                // Seamless looping of dust
-                if (dustParticles.position.y > 10) {
-                    dustParticles.position.y = 0;
-                }
+                if (dustParticles.position.y > 10) dustParticles.position.y = 0;
             }
 
             const waterPool = scene.getObjectByName("WaterPool");
             if (waterPool && materials.water.normalMap) {
-                // Bobbing the entire water surface slightly
-                waterPool.position.y = -0.2 + Math.sin(Date.now() * 0.002) * 0.05;
-                // Scroll the normal map
-                materials.water.normalMap.offset.x += dt * 0.05;
-                materials.water.normalMap.offset.y += dt * 0.03;
+                waterPool.position.y = WATER_Y + Math.sin(Date.now() * 0.0015) * 0.06;
+                materials.water.normalMap.offset.x += dt * 0.04;
+                materials.water.normalMap.offset.y += dt * 0.025;
             }
 
             renderer.render(scene, camera);
@@ -1180,7 +1660,6 @@
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
-
     </script>
 </body>
 </html>
