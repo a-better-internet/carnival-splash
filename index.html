@@ -242,6 +242,7 @@
         // Cursor-aim look state
         let lookYaw = 0, lookPitch = 0;       // current camera angles
         let targetYaw = 0, targetPitch = 0;   // desired angles from cursor
+        let gunPivot = null, muzzleTip = null; // gun aiming pivot + muzzle marker
 
         // Game Objects
         const targets = [];
@@ -921,10 +922,21 @@
             grip.rotation.x = 0.3;
             gunGroup.add(grip);
 
-            gunGroup.scale.set(0.42, 0.42, 0.42);
-            gunGroup.position.set(0.1, -0.2, -0.2);
+            // Marker at the very tip of the nozzle (jet originates here in world space)
+            muzzleTip = new THREE.Object3D();
+            muzzleTip.position.set(0.5, -0.5, -1.97);
+            gunGroup.add(muzzleTip);
 
-            camera.add(gunGroup);
+            gunGroup.scale.set(0.42, 0.42, 0.42);
+            // Re-center the gun so the pivot sits near the grip, not off to the side
+            gunGroup.position.set(-0.21, 0.399, 0.126);
+
+            // Pivot that rotates to follow the aim pointer
+            gunPivot = new THREE.Group();
+            gunPivot.position.set(0.31, -0.6, -0.33); // held position (rest pose ~ as before)
+            gunPivot.add(gunGroup);
+
+            camera.add(gunPivot);
             scene.add(camera);
 
             // Glowing pressurized jet core (a tapered translucent stream from the muzzle)
@@ -1421,7 +1433,9 @@
                 // Aim ray points through the crosshair so the visible jet matches the hit
                 raycaster.setFromCamera(mouse, camera);
                 const dir = raycaster.ray.direction.clone();
-                const nozzlePos = new THREE.Vector3(0.31, -0.41, -0.956).applyMatrix4(camera.matrixWorld);
+                const nozzlePos = muzzleTip
+                    ? muzzleTip.getWorldPosition(new THREE.Vector3())
+                    : new THREE.Vector3(0.31, -0.41, -0.956).applyMatrix4(camera.matrixWorld);
 
                 for (let k = 0; k < 5; k++) {
                     const p = waterParticles.find(p => !p.active);
@@ -1615,6 +1629,17 @@
             lookPitch += (targetPitch - lookPitch) * k;
             camera.rotation.set(lookPitch, lookYaw, 0);
             camera.updateMatrixWorld(true);
+
+            // Tilt the gun to point along the same aim ray as the spray
+            if (gunPivot) {
+                const tanHalf = Math.tan((camera.fov * Math.PI / 180) / 2);
+                const lx = mouse.x * tanHalf * camera.aspect;
+                const ly = mouse.y * tanHalf;
+                const localDir = new THREE.Vector3(lx, ly, -1).normalize();
+                const targetQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), localDir);
+                gunPivot.quaternion.slerp(targetQ, Math.min(1, dt * 14));
+                camera.updateMatrixWorld(true); // refresh muzzle world pos after tilt
+            }
 
             updateParticles(dt);
             updateTargets(dt);
