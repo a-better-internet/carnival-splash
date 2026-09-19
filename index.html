@@ -45,22 +45,56 @@
         #time-display { color: #ff4500; }
         #combo-display {
             position: absolute;
-            top: 70px;
+            top: 64px;
             left: 50%;
             transform: translateX(-50%);
-            font-size: 26px;
+            font-size: 30px;
             font-weight: bold;
             color: #00ffcc;
             text-shadow: 3px 3px 0 #000, -1px -1px 0 #000, 1px 1px 0 #000;
             opacity: 0;
             transition: opacity 0.2s;
             z-index: 10;
+            text-align: center;
+            white-space: nowrap;
+        }
+        #combo-bar {
+            position: absolute;
+            top: 104px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 220px;
+            height: 10px;
+            background: rgba(0,0,0,0.4);
+            border: 2px solid rgba(255,255,255,0.5);
+            border-radius: 6px;
+            overflow: hidden;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 10;
+        }
+        #combo-bar-fill {
+            height: 100%;
+            width: 100%;
+            background: linear-gradient(90deg, #00ffcc, #ffde00);
+            border-radius: 4px;
+        }
+        #high-display {
+            font-size: 18px;
+            color: #ff9ee0;
+            text-shadow: 2px 2px 0 #000;
+            margin-top: 2px;
         }
         #mute-indicator {
             font-size: 16px;
             color: rgba(255,255,255,0.7);
             text-shadow: 2px 2px 0 #000;
-            margin-top: 8px;
+            margin-top: 6px;
+        }
+        .time-bonus-text {
+            color: #6dff6d;
+            font-size: 40px;
+            text-shadow: 3px 3px 0 #000, 0 0 12px #2bff2b;
         }
 
         #crosshair {
@@ -90,6 +124,11 @@
         #crosshair.shooting {
             transform: translate(-50%, -50%) scale(1.3);
             border-color: rgba(0, 255, 255, 1);
+        }
+        #crosshair.hit {
+            transform: translate(-50%, -50%) scale(1.7);
+            border-color: #ffde00;
+            box-shadow: 0 0 16px #ffde00, 0 0 8px #fff;
         }
 
         #overlay {
@@ -187,11 +226,13 @@
         <div id="hud">
             <div>
                 <div>Score: <span id="score-display">0</span></div>
+                <div id="high-display">Best: 0</div>
                 <div id="mute-indicator">M: Sound On</div>
             </div>
             <div>Time: <span id="time-display">60</span>s</div>
         </div>
         <div id="combo-display"></div>
+        <div id="combo-bar"><div id="combo-bar-fill"></div></div>
         <div id="crosshair"></div>
     </div>
 
@@ -206,6 +247,7 @@
                 ✨ Golden Duck: <strong style="color:#ffd700; text-shadow: 0 0 5px #ff8800;">500 pts</strong><br>
                 🚤 Speedboat Bullseye: <strong style="color:#00ffcc">200 pts</strong><br>
                 🎯 Duck/Boat Bullseye: <strong style="color:#ff0055">150 pts</strong><br>
+                🎈 Bonus Balloon: <strong style="color:#6dff6d">250 pts +3s!</strong><br>
                 🐟 Flying Fish: <strong style="color:#ffde00">100 pts</strong><br>
                 🏐 Bouncy Beach Ball: <strong>80 pts</strong><br>
                 🏓 Ping Pong Ball: <strong>50 pts</strong><br>
@@ -234,6 +276,23 @@
         // Combo system
         let comboCount = 0;
         let comboTimer = 0;
+        const COMBO_WINDOW = 2.2;       // seconds to keep a combo alive
+        let bestCombo = 0;
+        let targetsHit = 0;
+        let highScore = 0;
+
+        // Difficulty ramp
+        let elapsed = 0;
+        let spawnChance = 0.04;
+        let maxTargets = 18;
+        let speedScale = 1;
+
+        // Juice
+        let shake = 0;
+        let fovBase = 70;
+        let fovKick = 0;
+        let muzzleLight = null;
+        const basePos = new THREE.Vector3(0, 6, 12);
 
         // Three.js Core
         let scene, camera, renderer;
@@ -266,9 +325,16 @@
         const titleText = document.getElementById('title-text');
         const crosshair = document.getElementById('crosshair');
         const comboDisplay = document.getElementById('combo-display');
+        const comboBar = document.getElementById('combo-bar');
+        const comboBarFill = document.getElementById('combo-bar-fill');
+        const highDisplay = document.getElementById('high-display');
         const muteIndicator = document.getElementById('mute-indicator');
         const instructionsEl = document.getElementById('instructions');
         const originalInstructions = instructionsEl.innerHTML;
+
+        // Persistent high score (best-effort; works when opened as a standalone file)
+        try { highScore = parseInt(localStorage.getItem('carnivalSplashHigh') || '0', 10) || 0; } catch (e) { highScore = 0; }
+        function saveHighScore() { try { localStorage.setItem('carnivalSplashHigh', String(highScore)); } catch (e) {} }
 
         // ============================================================
         //  Audio (Web Audio API, synthesised – no external assets)
@@ -339,10 +405,48 @@
             [392, 523, 659, 784].forEach((f, i) =>
                 setTimeout(() => playTone(f, 0.25, 'triangle', 0.12), i * 140));
         }
+        function playTimeBonus() {
+            [659, 988, 1319].forEach((f, i) => setTimeout(() => playTone(f, 0.15, 'sine', 0.12), i * 60));
+        }
+
+        // Soft ambient music pad — a slow, gentle chord progression
+        let musicTimer = null, musicStep = 0;
+        const musicChords = [
+            [261.63, 329.63, 392.00], // C
+            [220.00, 277.18, 329.63], // Am
+            [174.61, 220.00, 261.63], // F
+            [196.00, 246.94, 293.66], // G
+        ];
+        function playPad(freqs) {
+            if (!audioCtx || muted) return;
+            const t = audioCtx.currentTime;
+            freqs.forEach(f => {
+                const o = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                o.type = 'triangle';
+                o.frequency.value = f;
+                g.gain.setValueAtTime(0.0001, t);
+                g.gain.linearRampToValueAtTime(0.022, t + 0.4);
+                g.gain.linearRampToValueAtTime(0.0001, t + 1.9);
+                o.connect(g); g.connect(audioCtx.destination);
+                o.start(t); o.stop(t + 2.0);
+            });
+        }
+        function startMusic() {
+            if (!audioCtx || muted || musicTimer) return;
+            playPad(musicChords[musicStep % musicChords.length]); musicStep++;
+            musicTimer = setInterval(() => {
+                playPad(musicChords[musicStep % musicChords.length]); musicStep++;
+            }, 2100);
+        }
+        function stopMusic() {
+            if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+        }
         function setMuted(m) {
             muted = m;
             muteIndicator.innerText = muted ? 'M: Sound Off' : 'M: Sound On';
-            if (muted) stopSpraySound();
+            if (muted) { stopSpraySound(); stopMusic(); }
+            else if (isPlaying) startMusic();
         }
 
         // ============================================================
@@ -474,9 +578,8 @@
 
             document.addEventListener('wheel', (e) => {
                 if (!isPlaying) return;
-                camera.fov += e.deltaY * 0.05;
-                camera.fov = Math.max(30, Math.min(110, camera.fov));
-                camera.updateProjectionMatrix();
+                fovBase += e.deltaY * 0.05;
+                fovBase = Math.max(30, Math.min(110, fovBase));
             }, { passive: true });
 
             document.addEventListener('keydown', (e) => {
@@ -927,6 +1030,11 @@
             muzzleTip.position.set(0.5, -0.5, -1.97);
             gunGroup.add(muzzleTip);
 
+            // Muzzle glow light (on while spraying)
+            muzzleLight = new THREE.PointLight(0x66ddff, 0, 6);
+            muzzleLight.position.set(0.5, -0.5, -2.1);
+            gunGroup.add(muzzleLight);
+
             gunGroup.scale.set(0.42, 0.42, 0.42);
             // Re-center the gun so the pivot sits near the grip, not off to the side
             gunGroup.position.set(-0.21, 0.399, 0.126);
@@ -1032,7 +1140,7 @@
             const targetObj = new THREE.Group();
             targetObj.userData = {
                 type: type, active: true,
-                speed: (Math.random() * 2 + 2) * (Math.random() > 0.5 ? 1 : -1),
+                speed: (Math.random() * 2 + 2) * (Math.random() > 0.5 ? 1 : -1) * speedScale,
                 baseY: 0, age: 0
             };
 
@@ -1257,6 +1365,56 @@
             targets.push(targetObj);
         }
 
+        // A drifting bonus balloon that rises from the pool — pop it for points + time
+        function spawnBonusBalloon() {
+            const colors = [0xff3b6e, 0x3bd0ff, 0xffd23b, 0x9b6bff, 0x47ff9b];
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            const g = new THREE.Group();
+            g.userData = {
+                type: 'bonus_balloon', active: true, age: 0,
+                speed: (Math.random() - 0.5) * 2, rise: 1.6 + Math.random() * 0.8
+            };
+            const sharedData = { isTarget: true, type: 'bonus', points: 250, timeBonus: 3, parentGrp: g };
+
+            const balloonGeo = new THREE.SphereGeometry(0.7, 18, 18);
+            balloonGeo.scale(1, 1.18, 1);
+            const body = new THREE.Mesh(balloonGeo, new THREE.MeshPhysicalMaterial({
+                color, roughness: 0.2, clearcoat: 1.0, transmission: 0.25, transparent: true, opacity: 0.95
+            }));
+            body.position.y = 0.7;
+            body.castShadow = true;
+            body.userData = sharedData;
+
+            const knot = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.22, 6), new THREE.MeshLambertMaterial({ color }));
+            knot.position.y = -0.05; knot.rotation.x = Math.PI; knot.userData = sharedData;
+
+            const str = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.4, 6),
+                new THREE.MeshBasicMaterial({ color: 0xffffff }));
+            str.position.y = -0.75;
+
+            const glow = new THREE.PointLight(color, 0.8, 6);
+            glow.position.y = 0.7;
+
+            g.add(body, knot, str, glow);
+            g.position.set((Math.random() - 0.5) * 30, -1.5, -8 - Math.random() * 8);
+            scene.add(g);
+            targets.push(g);
+        }
+
+        function burstConfetti(pos, n) {
+            let count = 0;
+            for (let i = 0; i < confettis.length && count < n; i++) {
+                const c = confettis[i];
+                if (!c.active) {
+                    c.active = true; c.mesh.visible = true;
+                    c.mesh.position.copy(pos);
+                    c.velocity.set((Math.random() - 0.5) * 10, 2 + Math.random() * 6, (Math.random() - 0.5) * 10);
+                    c.angularVel.set(Math.random() * 0.3, Math.random() * 0.3, Math.random() * 0.3);
+                    count++;
+                }
+            }
+        }
+
         // ============================================================
         //  Game Logic
         // ============================================================
@@ -1276,7 +1434,17 @@
             timeLeft = 60;
             comboCount = 0;
             comboTimer = 0;
+            bestCombo = 0;
+            targetsHit = 0;
+            elapsed = 0;
+            speedScale = 1;
+            spawnChance = 0.04;
+            maxTargets = 18;
+            shake = 0;
+            fovKick = 0;
             comboDisplay.style.opacity = 0;
+            comboBar.style.opacity = 0;
+            highDisplay.innerText = 'Best: ' + highScore;
             updateHUD();
 
             instructionsEl.innerHTML = originalInstructions;
@@ -1286,6 +1454,14 @@
             targets.length = 0;
 
             startTimer();
+            startMusic();
+            flashCombo('GO!');
+        }
+
+        function flashCombo(text) {
+            comboDisplay.innerText = text;
+            comboDisplay.style.opacity = 1;
+            setTimeout(() => { if (comboCount < 3) comboDisplay.style.opacity = 0; }, 700);
         }
 
         function pauseGame() {
@@ -1295,6 +1471,7 @@
             isShooting = false;
             crosshair.classList.remove('shooting');
             stopSpraySound();
+            stopMusic();
             overlay.style.display = 'flex';
             crosshair.style.display = 'none';
             document.body.style.cursor = 'auto';
@@ -1308,6 +1485,7 @@
             isPaused = false;
             overlay.style.display = 'none';
             startTimer();
+            startMusic();
         }
 
         function endGame() {
@@ -1317,13 +1495,26 @@
             isShooting = false;
             crosshair.classList.remove('shooting');
             stopSpraySound();
+            stopMusic();
             overlay.style.display = 'flex';
             crosshair.style.display = 'none';
+            comboDisplay.style.opacity = 0;
+            comboBar.style.opacity = 0;
             document.body.style.cursor = 'auto';
-            titleText.innerText = 'Time Up!';
+
+            const isNewBest = score > highScore;
+            if (isNewBest) { highScore = score; saveHighScore(); }
+            highDisplay.innerText = 'Best: ' + highScore;
+
+            titleText.innerText = isNewBest ? 'New High Score!' : 'Time Up!';
             instructionsEl.innerHTML =
-                '<h2 style="font-size: 48px; color: #00ffcc; margin:0;">Final Score: ' + score + '</h2>' +
-                '<p>Great shooting! Ready for another round?</p>';
+                '<h2 style="font-size: 46px; color: #00ffcc; margin:0 0 6px;">Final Score: ' + score + '</h2>' +
+                (isNewBest
+                    ? '<p style="color:#ffd700; font-size:24px; margin:0 0 10px;">★ A new personal best! ★</p>'
+                    : '<p style="font-size:20px; margin:0 0 10px;">Best: ' + highScore + '</p>') +
+                '<p style="font-size:20px; margin:0;">Targets hit: <strong>' + targetsHit +
+                '</strong> &nbsp;•&nbsp; Best combo: <strong>x' + comboMultiplierFor(bestCombo) +
+                '</strong> (' + bestCombo + ' hits)</p>';
             startBtn.innerText = 'Play Again';
             playGameOver();
 
@@ -1341,12 +1532,23 @@
             timeDisplay.innerText = Math.max(0, timeLeft);
         }
 
+        function comboMultiplierFor(count) {
+            if (count >= 12) return 5;
+            if (count >= 8) return 4;
+            if (count >= 5) return 3;
+            if (count >= 3) return 2;
+            return 1;
+        }
+
         function registerCombo() {
             comboCount++;
-            comboTimer = 2.0;
-            if (comboCount >= 3) {
-                comboDisplay.innerText = comboCount + 'x COMBO!';
+            comboTimer = COMBO_WINDOW;
+            if (comboCount > bestCombo) bestCombo = comboCount;
+            const mult = comboMultiplierFor(comboCount);
+            if (mult > 1) {
+                comboDisplay.innerText = 'x' + mult + ' COMBO  (' + comboCount + ')';
                 comboDisplay.style.opacity = 1;
+                comboBar.style.opacity = 1;
             }
         }
 
@@ -1359,6 +1561,9 @@
             } else if (kind === 'bullseye') {
                 div.classList.add('bullseye-text');
                 div.innerText = 'BULLSEYE!\n+' + points;
+            } else if (kind === 'time') {
+                div.classList.add('time-bonus-text');
+                div.innerText = '+' + points + 's';
             } else {
                 div.innerText = '+' + points;
             }
@@ -1396,19 +1601,43 @@
             const parent = data.parentGrp;
             if (parent && !parent.userData.active) return;
 
-            score += data.points;
-            updateHUD();
             registerCombo();
+            const mult = comboMultiplierFor(comboCount);
+            const gained = data.points * mult;
+            score += gained;
+            targetsHit++;
+            updateHUD();
+
+            // Hit-marker flash
+            crosshair.classList.add('hit');
+            setTimeout(() => crosshair.classList.remove('hit'), 110);
 
             let kind = 'normal';
             if (data.points >= 500) kind = 'jackpot';
             else if (data.type === 'bullseye') kind = 'bullseye';
-            spawnFloatingText(data.points, kind, intersect.point);
+            spawnFloatingText(gained, kind, intersect.point);
             playHit(data.points, data.type === 'bullseye');
+
+            // Screen shake scales with the value of the hit
+            shake = Math.min(0.5, Math.max(shake, data.points >= 500 ? 0.5 : data.points >= 150 ? 0.28 : 0.12));
+            if (data.points >= 500) fovKick = -10; // zoom-punch on jackpot
+
+            // Time bonus (bonus balloon)
+            if (data.timeBonus) {
+                timeLeft += data.timeBonus;
+                updateHUD();
+                spawnFloatingText(data.timeBonus, 'time', intersect.point);
+                playTimeBonus();
+            }
 
             if (parent) {
                 parent.userData.active = false;
-                if (data.type === 'ball') {
+                if (parent.userData.type === 'bonus_balloon') {
+                    burstConfetti(intersect.point, 26);
+                    scene.remove(parent);
+                    const idx = targets.indexOf(parent);
+                    if (idx !== -1) targets.splice(idx, 1);
+                } else if (data.type === 'ball') {
                     parent.userData.ballVelocity = new THREE.Vector3((Math.random() - 0.5) * 0.2, 0.3, -0.2);
                 } else if (parent.userData.type === 'fish') {
                     parent.userData.hitDrop = true;
@@ -1465,6 +1694,7 @@
                     const f = 0.8 + Math.random() * 0.4; // subtle pressure flicker
                     jetCore.scale.set(f, 1, f);
                 }
+                if (muzzleLight) muzzleLight.intensity = 1.4 + Math.random() * 0.6;
 
                 const shootables = targets.concat(pinwheels);
                 const intersects = raycaster.intersectObjects(shootables, true);
@@ -1473,8 +1703,9 @@
                         intersects[0].face ? intersects[0].face.normal : new THREE.Vector3(0, 1, 0), 5);
                     handleHit(intersects[0]);
                 }
-            } else if (jetCore) {
-                jetCore.visible = false;
+            } else {
+                if (jetCore) jetCore.visible = false;
+                if (muzzleLight) muzzleLight.intensity = 0;
             }
 
             // Stream droplets
@@ -1535,8 +1766,9 @@
         }
 
         function updateTargets(dt) {
-            if (isPlaying && Math.random() < 0.04) {
-                if (targets.length < 18) spawnTarget();
+            if (isPlaying) {
+                if (Math.random() < spawnChance && targets.length < maxTargets) spawnTarget();
+                if (Math.random() < 0.0035) spawnBonusBalloon(); // rare floating bonus
             }
 
             for (let i = targets.length - 1; i >= 0; i--) {
@@ -1549,6 +1781,14 @@
                 });
 
                 if (t.userData.active) {
+                    if (type === 'bonus_balloon') {
+                        t.position.y += t.userData.rise * dt;
+                        t.position.x += Math.sin(t.userData.age * 1.5) * dt * 1.2 + t.userData.speed * dt * 0.3;
+                        t.rotation.z = Math.sin(t.userData.age * 2) * 0.12;
+                        if (t.position.y > 15) { scene.remove(t); targets.splice(i, 1); continue; }
+                        continue;
+                    }
+
                     t.position.x += t.userData.speed * dt;
 
                     if (type === 'beachball') {
@@ -1623,6 +1863,31 @@
             requestAnimationFrame(animate);
             const dt = Math.min(clock.getDelta(), 0.1);
 
+            // Difficulty ramp over the round
+            if (isPlaying) {
+                elapsed += dt;
+                const dT = Math.min(1, elapsed / 55);
+                spawnChance = 0.04 + dT * 0.05;
+                maxTargets = 18 + Math.floor(dT * 8);
+                speedScale = 1 + dT * 0.6;
+            }
+
+            // Screen shake (decaying), applied around the base camera position
+            shake = Math.max(0, shake - dt * 1.6);
+            camera.position.set(
+                basePos.x + (Math.random() - 0.5) * shake,
+                basePos.y + (Math.random() - 0.5) * shake,
+                basePos.z + (Math.random() - 0.5) * shake * 0.5
+            );
+
+            // FOV kick (jackpot zoom-punch), layered on top of zoom level
+            fovKick += (0 - fovKick) * Math.min(1, dt * 5);
+            const desiredFov = fovBase + fovKick;
+            if (Math.abs(camera.fov - desiredFov) > 0.01) {
+                camera.fov = desiredFov;
+                camera.updateProjectionMatrix();
+            }
+
             // Smoothly steer the camera toward the cursor aim
             const k = Math.min(1, dt * 8);
             lookYaw += (targetYaw - lookYaw) * k;
@@ -1645,12 +1910,14 @@
             updateTargets(dt);
             updatePinwheels(dt);
 
-            // Combo decay
+            // Combo decay + bar
             if (comboTimer > 0) {
                 comboTimer -= dt;
+                comboBarFill.style.width = Math.max(0, (comboTimer / COMBO_WINDOW) * 100) + '%';
                 if (comboTimer <= 0) {
                     comboCount = 0;
                     comboDisplay.style.opacity = 0;
+                    comboBar.style.opacity = 0;
                 }
             }
 
