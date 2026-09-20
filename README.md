@@ -62,7 +62,7 @@ kept in `localStorage`; the game degrades gracefully when storage is unavailable
 
 ## Implementation notes
 
-- **Single file, ~5,100 lines**, organised into numbered sections: config, storage,
+- **Single file, ~5,400 lines**, organised into numbered sections: config, storage,
   audio, textures, scene, targets, power-ups, game flow, UI, update loop.
 - **Pooled particles.** Stream droplets, splashes and confetti are `InstancedMesh`
   pools with O(1) free-lists, which keeps the whole particle system at three draw calls
@@ -72,4 +72,4 @@ kept in `localStorage`; the game degrades gracefully when storage is unavailable
   and 144 Hz.
 - **Explicit disposal.** Targets release their geometries and materials when they leave
   the scene; shared geometry and materials are registered up front and skipped.
-- Typical load: ~50k triangles and ~360 draw calls at High.
+- Typical load: ~59k triangles and ~530 draw calls at High.

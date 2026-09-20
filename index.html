@@ -1720,6 +1720,283 @@ function buildMidway() {
 }
 
 /* The pool, its coping, the mural wall behind it, and the player's stall. */
+/* Slow-drifting clouds high in the dusk sky. */
+function buildClouds() {
+  const n = Math.round(7 * Q().decor);
+  for (let i = 0; i < n; i++) {
+    const puff = new THREE.Group();
+    const tint = [0xffc9a8, 0xd9b6ff, 0xffe0c0][i % 3];
+    const lobes = 3 + Math.floor(Math.random() * 3);
+    for (let k = 0; k < lobes; k++) {
+      const sp = new THREE.Sprite(M.glowSprite.clone());
+      sp.material.color.setHex(tint);
+      sp.material.opacity = 0.16 + Math.random() * 0.12;
+      sp.material.fog = false;
+      sp.position.set((k - lobes / 2) * 9 + Math.random() * 4, Math.random() * 5, 0);
+      sp.scale.setScalar(20 + Math.random() * 16);
+      puff.add(sp);
+    }
+    puff.position.set(-90 + Math.random() * 180, 34 + Math.random() * 26, -105 - Math.random() * 40);
+    scene.add(puff);
+    floatDecor.push({ kind: 'cloud', obj: puff, speed: 0.3 + Math.random() * 0.5 });
+  }
+}
+
+/* A little airship cruising the horizon with a lit advertising panel. */
+function buildAirship() {
+  const g = new THREE.Group();
+  const skin = new THREE.MeshBasicMaterial({ color: 0x42276e, fog: false });
+  const hull = new THREE.Mesh(new THREE.SphereGeometry(4, 16, 12), skin);
+  hull.scale.set(2.6, 1, 1);
+  g.add(hull);
+
+  [1, -1].forEach(side => {
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(9, 3),
+      new THREE.MeshBasicMaterial({ color: 0xffd23f, fog: false, transparent: true, opacity: 0.9 }));
+    panel.position.set(0, 0.2, side * 4.05);
+    panel.rotation.y = side > 0 ? 0 : Math.PI;
+    g.add(panel);
+  });
+  // Running lights along the keel
+  for (let k = -3; k <= 3; k++) {
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.3, 6, 6),
+      new THREE.MeshBasicMaterial({ color: 0xff8a4c, fog: false }));
+    lamp.position.set(k * 2.6, -3.1, 0);
+    g.add(lamp);
+  }
+
+  const gondola = new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1.4),
+    new THREE.MeshBasicMaterial({ color: 0x2a1748, fog: false }));
+  gondola.position.y = -4.2;
+  g.add(gondola);
+
+  [-1, 1].forEach(sgn => {
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.2, 3), skin);
+    fin.position.set(-9, sgn * 1.4, 0);
+    fin.rotation.z = sgn * 0.5;
+    g.add(fin);
+  });
+
+  const glow = new THREE.Sprite(M.glowSprite.clone());
+  glow.material.color.setHex(0xffd23f);
+  glow.material.opacity = 0.16;
+  glow.material.fog = false;
+  glow.scale.setScalar(13);
+  g.add(glow);
+
+  g.position.set(-120, 44, -96);
+  scene.add(g);
+  floatDecor.push({ kind: 'airship', obj: g, speed: 2.4 });
+}
+
+/* Two searchlights raking the sky from behind the backdrop. */
+function buildSearchlights() {
+  if (Q().decor < 0.7) return;
+  [[-30, 0.5], [30, -0.5]].forEach(([x, phase], i) => {
+    const geo = new THREE.CylinderGeometry(0.3, 4.2, 72, 12, 1, true);
+    geo.translate(0, 35, 0);
+    const beam = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: i ? 0x9fd8ff : 0xffd9a8, transparent: true, opacity: 0.035,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
+    }));
+    beam.position.set(x, 0, BACK_WALL_Z - 16);
+    scene.add(beam);
+    floatDecor.push({ kind: 'beam', obj: beam, phase: phase, rate: 0.16 + i * 0.05 });
+  });
+}
+
+/* Low mist clinging to the pool, plus reflected light pooled on the surface. */
+function buildWaterAtmosphere() {
+  const midZ = (POOL_FRONT + POOL_BACK) / 2;
+  const n = Math.round(10 * Q().decor);
+  for (let i = 0; i < n; i++) {
+    const sp = new THREE.Sprite(M.glowSprite.clone());
+    sp.material.color.setHex(0xbfe4ff);
+    sp.material.opacity = 0.055 + Math.random() * 0.05;
+    sp.position.set((Math.random() - 0.5) * 58, 0.35 + Math.random() * 0.7,
+                    midZ + (Math.random() - 0.5) * 22);
+    sp.scale.set(16 + Math.random() * 14, 3.4 + Math.random() * 2.4, 1);
+    scene.add(sp);
+    floatDecor.push({ kind: 'mist', obj: sp, speed: (Math.random() - 0.5) * 0.5,
+                      phase: Math.random() * 6, base: sp.material.opacity });
+  }
+
+  // Cheap stand-in for reflections: soft pools of colour on the water under the
+  // light strands and the stall.
+  const refl = [[0, 0xffe9a8, 16], [-13, 0xff9ad4, 11], [13, 0x9ad8ff, 11]];
+  refl.forEach(([x, col, size]) => {
+    const sp = new THREE.Sprite(M.glowSprite.clone());
+    sp.material.color.setHex(col);
+    sp.material.opacity = 0.17;
+    sp.position.set(x, 0.06, -6);
+    sp.scale.set(size, size * 1.9, 1);
+    scene.add(sp);
+    floatDecor.push({ kind: 'reflection', obj: sp, phase: Math.random() * 6, base: 0.17 });
+  });
+}
+
+/* Fireflies drifting over the water. */
+function buildFireflies() {
+  const n = Math.round(26 * Q().decor);
+  for (let i = 0; i < n; i++) {
+    const sp = new THREE.Sprite(M.glowSprite.clone());
+    sp.material.color.setHex(Math.random() < 0.25 ? 0x9fe6ff : 0xfff0a8);
+    sp.material.opacity = 0.7;
+    sp.scale.setScalar(0.42 + Math.random() * 0.3);
+    sp.position.set((Math.random() - 0.5) * 50, 0.6 + Math.random() * 5,
+                    -3 - Math.random() * 20);
+    scene.add(sp);
+    floatDecor.push({
+      kind: 'firefly', obj: sp,
+      home: sp.position.clone(),
+      phase: Math.random() * 7, rate: 0.3 + Math.random() * 0.5,
+      swing: 1.2 + Math.random() * 2.4,
+    });
+  }
+}
+
+/* Neighbouring stalls along the midway. They sit behind the backdrop and are
+   scaled so their roofs and lit signs rise above it — anything at the player's
+   own depth would be far outside the frustum at this field of view. */
+function buildMidwayStalls() {
+  const cols = [0x2ff5d0, 0xff5fc8];
+  [[-43, 'POPCORN', 0], [43, 'CANDY FLOSS', 1]].forEach(([x, label, i]) => {
+    const g = new THREE.Group();
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(11, 7, 9),
+      new THREE.MeshLambertMaterial({ color: 0x3a2260 }));
+    body.position.y = 2;
+    g.add(body);
+
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(11.4, 0.5, 9.4),
+      new THREE.MeshLambertMaterial({ color: 0x6b4a2a }));
+    counter.position.y = 5.6;
+    g.add(counter);
+
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(9, 3.6, 4), M.stripe.clone());
+    roof.material.fog = false;
+    roof.rotation.y = Math.PI / 4;
+    roof.position.y = 7.9;
+    g.add(roof);
+
+    // Lit sign board
+    const [c, cx] = makeCanvas(512, 128);
+    cx.fillStyle = '#160b30'; cx.fillRect(0, 0, 512, 128);
+    cx.strokeStyle = i ? '#ff5fc8' : '#2ff5d0'; cx.lineWidth = 7;
+    cx.strokeRect(12, 12, 488, 104);
+    cx.font = 'bold 58px Impact, "Arial Black", sans-serif';
+    cx.textAlign = 'center'; cx.textBaseline = 'middle';
+    cx.fillStyle = i ? '#ff5fc8' : '#2ff5d0';
+    cx.fillText(label, 256, 68);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(8, 2),
+      new THREE.MeshBasicMaterial({ map: canvasTex(c), transparent: true, fog: false }));
+    sign.position.set(0, 11.2, 0);
+    g.add(sign);
+    [-2.6, 2.6].forEach(px => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.4, 0.3),
+        new THREE.MeshBasicMaterial({ color: 0x2a1748, fog: false }));
+      post.position.set(px, 9.6, 0);
+      g.add(post);
+    });
+
+    const halo = new THREE.Sprite(M.glowSprite.clone());
+    halo.material.color.setHex(cols[i]);
+    halo.material.opacity = 0.34;
+    halo.material.fog = false;
+    halo.position.set(0, 11.2, -0.3);
+    halo.scale.setScalar(11);
+    g.add(halo);
+    floatDecor.push({ kind: 'neon', obj: halo, phase: i * 2.1, base: 0.34 });
+
+    // Bulb string along the counter lip
+    for (let k = 0; k < 7; k++) {
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.3, 6, 6),
+        new THREE.MeshBasicMaterial({ color: 0xfff0b8, fog: false }));
+      bulb.position.set(-4.5 + k * 1.5, 6.0, 4.8);
+      g.add(bulb);
+    }
+
+    g.position.set(x, 2, -50);
+    g.scale.setScalar(2.1);
+    g.rotation.y = x < 0 ? 0.3 : -0.3;
+    scene.add(g);
+  });
+}
+
+/* A neon arch over the backdrop, high enough to sit against the sky. */
+function buildNeonArch() {
+  const [c, cx] = makeCanvas(1024, 256);
+  cx.clearRect(0, 0, 1024, 256);
+  cx.font = 'bold 132px Impact, "Arial Black", sans-serif';
+  cx.textAlign = 'center'; cx.textBaseline = 'middle';
+  cx.lineJoin = 'round';
+  cx.lineWidth = 26;
+  cx.strokeStyle = 'rgba(12,6,28,.92)';          // dark backing so it reads against the sky
+  cx.strokeText('SPLASH ZONE', 512, 128);
+  cx.lineWidth = 14;
+  cx.strokeStyle = '#12c9a6';                     // outer tube
+  cx.strokeText('SPLASH ZONE', 512, 128);
+  cx.lineWidth = 5;
+  cx.strokeStyle = '#8bffe8';                     // hot core
+  cx.strokeText('SPLASH ZONE', 512, 128);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(22, 5.5),
+    new THREE.MeshBasicMaterial({ map: canvasTex(c), transparent: true, fog: false }));
+  sign.position.set(0, 15.2, BACK_WALL_Z + 0.2);
+  scene.add(sign);
+
+  const halo = new THREE.Sprite(M.glowSprite.clone());
+  halo.material.color.setHex(0x2ff5d0);
+  halo.material.opacity = 0.13;
+  halo.material.fog = false;
+  halo.position.set(0, 15.2, BACK_WALL_Z + 0.1);
+  halo.scale.set(24, 7, 1);
+  scene.add(halo);
+  floatDecor.push({ kind: 'neon', obj: halo, phase: 0, base: 0.13 });
+
+  // Arch of bulbs over the sign
+  for (let i = 0; i <= 22; i++) {
+    const t = i / 22;
+    const a = Math.PI * t;
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.26, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xfff0b8, fog: false }));
+    bulb.position.set(Math.cos(a) * 15, 12.4 + Math.sin(a) * 7.4, BACK_WALL_Z + 0.5);
+    scene.add(bulb);
+    twinkleLights.push({ kind: 'bulb', mesh: bulb, phase: i * 0.4, base: 0xfff0b8, chase: i });
+  }
+}
+
+/* Reeds and lily pads softening the pool edges. */
+function buildPoolPlants() {
+  const reedMat = new THREE.MeshLambertMaterial({ color: 0x2f7d46 });
+  const padMat = new THREE.MeshLambertMaterial({ color: 0x3f9e55, side: THREE.DoubleSide });
+  const n = Math.round(16 * Q().decor);
+  for (let i = 0; i < n; i++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const x = side * (26.5 + Math.random() * 7);
+    const z = POOL_FRONT - 2 - Math.random() * 20;
+
+    const clump = new THREE.Group();
+    const blades = 3 + Math.floor(Math.random() * 3);
+    for (let k = 0; k < blades; k++) {
+      const h = 1.4 + Math.random() * 1.6;
+      const blade = new THREE.Mesh(new THREE.ConeGeometry(0.09, h, 4), reedMat);
+      blade.position.set((Math.random() - 0.5) * 0.7, h / 2 - 0.1, (Math.random() - 0.5) * 0.7);
+      blade.rotation.z = (Math.random() - 0.5) * 0.4;
+      clump.add(blade);
+    }
+    clump.position.set(x, 0, z);
+    scene.add(clump);
+    floatDecor.push({ kind: 'reed', obj: clump, phase: Math.random() * 6 });
+
+    if (Math.random() < 0.6) {
+      const pad = new THREE.Mesh(new THREE.CircleGeometry(0.7 + Math.random() * 0.5, 12, 0.4, Math.PI * 2 - 0.8), padMat);
+      pad.rotation.x = -Math.PI / 2;
+      pad.position.set(x + (Math.random() - 0.5) * 4, 0.05, z + (Math.random() - 0.5) * 3);
+      scene.add(pad);
+    }
+  }
+}
+
 function buildArena() {
   const midZ = (POOL_FRONT + POOL_BACK) / 2;
   const depth = POOL_FRONT - POOL_BACK;
@@ -1794,6 +2071,11 @@ function buildArena() {
   buildBunting();
   buildPinwheels();
   buildDust();
+  buildMidwayStalls();
+  buildNeonArch();
+  buildPoolPlants();
+  buildWaterAtmosphere();
+  buildFireflies();
 }
 
 /* Plush prizes on a shelf across the back wall — they light up as you earn them. */
@@ -2229,7 +2511,7 @@ function buildWaterGun() {
 
   // Held low and to the right, well clear of the crosshair.
   gunGroup.position.set(0, -0.05, 0);
-  gunGroup.rotation.set(0.04, 0.26, -0.07);   // toe-in so we read the flank, not the muzzle
+  gunGroup.rotation.set(0, 0, -0.10);   // roll only: never changes where the barrel points
   gunGroup.scale.setScalar(0.68);
 
   gunPivot = new THREE.Group();
@@ -2567,38 +2849,59 @@ function buildDuck(group, dir, isGold) {
   const mat = isGold ? M.gold : M.yellow;
   const data = hitData(group, isGold ? 600 : 10, isGold ? 'jackpot' : 'body');
 
+  // The body floats with only a sliver below the waterline, and the head sits
+  // clear on top of a neck. (Previously the head sphere was sunk so far into
+  // the body that barely a third of it showed, so the duck read as headless.)
   const body = new THREE.Mesh(GEO.duckBody, mat);
-  body.scale.set(1.25, 0.95, 1);
-  body.position.y = 0.55;
+  body.scale.set(1.32, 1.0, 1.06);
+  body.position.y = 0.66;
+
   const tail = new THREE.Mesh(GEO.duckTail, mat);
-  tail.position.set(-0.7 * dir, 0.72, 0);
-  tail.rotation.z = dir > 0 ? -Math.PI / 3 : Math.PI / 3;
+  tail.position.set(-0.76 * dir, 0.94, 0);
+  tail.rotation.z = dir > 0 ? -Math.PI / 2.6 : Math.PI / 2.6;
+
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.3, 0.62, 10), mat);
+  neck.position.set(0.44 * dir, 1.2, 0);
+  neck.rotation.z = -0.22 * dir;
+
   const head = new THREE.Mesh(GEO.duckHead, mat);
-  head.position.set(0.5 * dir, 1.15, 0);
+  head.scale.setScalar(1.12);
+  head.position.set(0.58 * dir, 1.63, 0);
+
   const beak = new THREE.Mesh(GEO.beak, M.orange);
   beak.rotation.z = -Math.PI / 2 * dir;
-  beak.position.set(0.86 * dir, 1.12, 0);
+  beak.position.set(1.02 * dir, 1.58, 0);
 
-  group.add(body, tail, head, beak);
-  [body, tail, head, beak].forEach(m => { m.userData = data; m.castShadow = Q().shadows; });
-  addEyes(group, 0.62 * dir, 1.26, 0.22, data);
+  // Stubby wings so the silhouette is not a bare ovoid.
+  const wings = [];
+  [-1, 1].forEach(sgn => {
+    const w = new THREE.Mesh(GEO.duckHead, mat);
+    w.scale.set(1.0, 0.55, 0.32);
+    w.position.set(-0.06 * dir, 0.74, sgn * 0.6);
+    w.rotation.x = sgn * 0.16;
+    wings.push(w);
+  });
+
+  const parts = [body, tail, neck, head, beak].concat(wings);
+  parts.forEach(m => { m.userData = data; m.castShadow = Q().shadows; group.add(m); });
+  addEyes(group, 0.78 * dir, 1.74, 0.23, data);
 
   if (isGold) {
     group.add(new THREE.PointLight(0xffcc33, 2.2, 11));
-    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.22, 6), M.gold);
-    crown.position.set(0.5 * dir, 1.55, 0);
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.28, 0.24, 6), M.gold);
+    crown.position.set(0.58 * dir, 2.08, 0);
     crown.userData = data;
     group.add(crown);
     const sp = new THREE.Sprite(M.glowSprite.clone());
     sp.material.color.setHex(0xffd23f);
     sp.material.opacity = 0.75;
-    sp.position.set(0, 1, 0);
-    sp.scale.setScalar(4.5);
+    sp.position.set(0, 1.2, 0);
+    sp.scale.setScalar(4.8);
     group.add(sp);
     group.userData.goldGlow = sp;
   } else {
     const bull = makeBullseye(0.36, 150, group);
-    bull.position.set(0, 0.62, 0.56);
+    bull.position.set(0, 0.72, 0.62);
     group.add(bull);
   }
 }
@@ -4447,7 +4750,7 @@ function updateSpray(dt) {
     gunGroup.position.y, -0.05 + (spraying ? Math.sin(performance.now() * 0.03) * 0.006 : 0),
     Math.min(1, dt * 12));
   gunGroup.rotation.z = THREE.MathUtils.lerp(
-    gunGroup.rotation.z, spraying ? -0.115 : -0.07, Math.min(1, dt * 14));
+    gunGroup.rotation.z, spraying ? -0.155 : -0.10, Math.min(1, dt * 14));
   if (gunGroup.userData.trigger) {
     gunGroup.userData.trigger.position.z = THREE.MathUtils.lerp(
       gunGroup.userData.trigger.position.z, G.shooting ? -0.008 : -0.03, Math.min(1, dt * 20));
@@ -4714,7 +5017,7 @@ function updateTargets(sdt) {
 
         case 'golden_duck':
           t.position.x += u.speed * sdt;
-          t.position.y = Math.abs(Math.sin(u.age * 7)) * 1.4;
+          t.position.y = 0.09 + Math.abs(Math.sin(u.age * 7)) * 1.4;
           t.rotation.y = Math.sin(u.age * 9) * 0.16;
           if (u.goldGlow) u.goldGlow.scale.setScalar(4.2 + Math.sin(u.age * 10) * 0.7);
           if (t.position.y < 0.1) emitRipple(t.position.x, t.position.z, 1.4);
@@ -4722,7 +5025,9 @@ function updateTargets(sdt) {
 
         default:
           t.position.x += u.speed * sdt;
-          t.position.y = Math.sin(u.age * 3 + u.bobPhase) * 0.11;
+          // Bob about a slightly raised rest height so the hull never sinks
+          // below the surface and clips.
+          t.position.y = 0.09 + Math.sin(u.age * 3 + u.bobPhase) * 0.08;
           t.rotation.z = Math.sin(u.age * 2.4 + u.bobPhase) * 0.05;
           break;
       }
@@ -4881,6 +5186,36 @@ function updateDecor(dt) {
       d.obj.rotation.y = Math.sin(now * 1.1 + d.phase) * 0.25;
     } else if (d.kind === 'spin') {
       d.obj.rotation.y += dt * d.rate;
+    } else if (d.kind === 'cloud') {
+      d.obj.position.x += dt * d.speed;
+      if (d.obj.position.x > 110) d.obj.position.x = -110;
+    } else if (d.kind === 'airship') {
+      d.obj.position.x += dt * d.speed;
+      d.obj.position.y = 44 + Math.sin(now * 0.3) * 1.4;
+      if (d.obj.position.x > 130) {
+        d.obj.position.x = -130;
+        d.obj.position.z = -88 - Math.random() * 28;
+      }
+    } else if (d.kind === 'beam') {
+      d.obj.rotation.z = Math.sin(now * d.rate + d.phase) * 0.6;
+      d.obj.rotation.x = Math.cos(now * d.rate * 0.7 + d.phase) * 0.18;
+    } else if (d.kind === 'mist') {
+      d.obj.position.x += dt * d.speed;
+      if (d.obj.position.x > 32) d.obj.position.x = -32;
+      if (d.obj.position.x < -32) d.obj.position.x = 32;
+      d.obj.material.opacity = d.base * (0.6 + 0.4 * Math.sin(now * 0.4 + d.phase));
+    } else if (d.kind === 'reflection' || d.kind === 'neon') {
+      d.obj.material.opacity = d.base * (0.72 + 0.28 * Math.sin(now * 1.6 + d.phase));
+    } else if (d.kind === 'firefly') {
+      const t = now * d.rate + d.phase;
+      d.obj.position.set(
+        d.home.x + Math.sin(t) * d.swing,
+        d.home.y + Math.sin(t * 1.7 + 1.2) * d.swing * 0.5,
+        d.home.z + Math.cos(t * 0.8) * d.swing
+      );
+      d.obj.material.opacity = 0.25 + 0.55 * Math.abs(Math.sin(t * 2.3));
+    } else if (d.kind === 'reed') {
+      d.obj.rotation.z = Math.sin(now * 1.1 + d.phase) * 0.09;
     } else if (d.kind === 'firework') {
       d.t -= dt;
       if (d.t <= 0) { d.t = d.period; d.obj.material.opacity = 0.9; d.obj.scale.setScalar(4); }
@@ -4999,15 +5334,14 @@ function updateCamera(dt) {
   if (gunPivot) {
     const tanHalf = Math.tan((camera.fov * Math.PI / 180) / 2);
     _v1.set(aim.x * tanHalf * camera.aspect, aim.y * tanHalf, -1).normalize();
+    // Follow the aim ray exactly, so the barrel, the muzzle flare and the jet
+    // are always collinear no matter which way you are pointing.
     _q1.setFromUnitVectors(_FORWARD, _v1);
-    // Follow the aim only part-way: a full swing drags the model across the crosshair.
-    _q2.identity().slerp(_q1, 0.55);
-    gunPivot.quaternion.slerp(_q2, Math.min(1, dt * 14));
+    gunPivot.quaternion.slerp(_q1, Math.min(1, dt * 16));
     camera.updateMatrixWorld(true);   // refresh the muzzle's world position
   }
 }
 const _FORWARD = new THREE.Vector3(0, 0, -1);
-const _q2 = new THREE.Quaternion();
 
 /* ---- Main loop --------------------------------------------------------- */
 
@@ -5078,6 +5412,9 @@ function boot() {
   buildLights();
   buildSky();
   buildMidway();
+  buildClouds();
+  buildAirship();
+  buildSearchlights();
   buildArena();
   buildWaterGun();
   buildPools();
